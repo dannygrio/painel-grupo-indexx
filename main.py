@@ -3,22 +3,25 @@ import pandas as pd
 from datetime import datetime
 import requests
 
-# Título e login
+st.set_page_config(page_title="Painel Interno", layout="centered")
+
 st.title("🔐 Painel Interno – Gestão Grupo Indexx")
 
-senha_digitada = st.text_input("Digite a senha de acesso", type="password")
-
+# Verifica se secrets estão configurados
 if "auth" not in st.secrets or "senha" not in st.secrets["auth"]:
     st.error("⚠️ Senha não configurada corretamente no secrets.")
     st.stop()
 
 senha_correta = st.secrets["auth"]["senha"]
+senha_digitada = st.text_input("Digite a senha de acesso", type="password")
 
+# Login
 if senha_digitada != senha_correta:
-    st.warning("Senha incorreta. Acesso negado.")
-    st.stop()
+    if senha_digitada != "":
+        st.warning("Senha incorreta. Acesso negado.")
+    st.stop()  # bloqueia o painel
 
-# Se chegou aqui, a senha está correta, prossegue para a API
+# Após login:
 KOBANA_API_KEY = st.secrets["kobana"]["api_token"]
 
 headers = {
@@ -37,7 +40,6 @@ response = requests.get(url, headers=headers, params=params)
 
 if response.status_code == 200:
     dados = response.json()
-
     if isinstance(dados, dict) and "bank_billets" in dados:
         boletos_raw = dados["bank_billets"]
     elif isinstance(dados, list):
@@ -49,19 +51,17 @@ if response.status_code == 200:
     boletos = pd.DataFrame([{
         "Nome": b.get("customer_person_name", ""),
         "CPF/CNPJ": b.get("customer_cnpj_cpf", ""),
-        "Status": b.get("status", ""),
+        "Status": b.get("status", "").capitalize(),  # "opened" → "Opened"
         "Valor": float(b.get("amount", 0)) / 100,
         "Data de Vencimento": b.get("expire_at", ""),
         "Data de Pagamento": b.get("paid_at", "")
     } for b in boletos_raw])
 
-    # st.write("🔍 Conteúdo recebido da API:", boletos_raw)  # pode comentar se quiser esconder
-
 else:
     st.error("Erro ao acessar a API da Kobana.")
     st.stop()
 
-# Menu lateral
+# MENU
 menu = st.sidebar.selectbox("Selecione a função", [
     "📊 Resumo Geral",
     "🧾 Cancelar Assinatura",
@@ -70,12 +70,12 @@ menu = st.sidebar.selectbox("Selecione a função", [
     "📅 Relatório de Pagamentos"
 ])
 
-# Resumo geral
+# FUNÇÕES
 if menu == "📊 Resumo Geral":
     total_boletos = len(boletos)
     vencidos = boletos[boletos["Status"] == "Vencido"]
     pagos = boletos[boletos["Status"] == "Pago"]
-    abertos = total_boletos - len(vencidos) - len(pagos)
+    abertos = boletos[boletos["Status"] == "Opened"]
     total_pago = pagos["Valor"].sum()
 
     st.subheader("📊 Resumo Financeiro")
@@ -83,7 +83,7 @@ if menu == "📊 Resumo Geral":
     st.metric("Boletos Vencidos", len(vencidos))
     st.metric("Boletos Pagos", len(pagos))
     st.metric("Valor Total Pago", f"R$ {total_pago:,.2f}".replace(".", ","))
-    st.metric("Boletos em Aberto", abertos)
+    st.metric("Boletos em Aberto", len(abertos))
 
 elif menu == "🧾 Cancelar Assinatura":
     st.subheader("🧾 Cancelar Assinatura")
