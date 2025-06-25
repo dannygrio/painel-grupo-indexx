@@ -1,6 +1,16 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+import requests
+import pandas as pd
+
+senha_correta = st.secrets["auth"]["senha"]
+KOBANA_API_KEY = st.secrets["kobana"]["api_token"]
+
+headers = {
+    "Content-Type": "application/json",
+    "Authorization": f"Bearer {KOBANA_API_KEY}"
+}
 
 # Simulação de dados (normalmente viria da API Kobana)
 boletos = pd.DataFrame({
@@ -15,9 +25,9 @@ boletos = pd.DataFrame({
 # Título e login
 st.title("🔐 Painel Interno – Gestão Grupo Indexx")
 
-senha = st.text_input("Digite a senha de acesso", type="password")
-if senha != "admin123":
-    st.warning("Acesso restrito. Digite a senha correta.")
+senha_digitada = st.text_input("Digite a senha de acesso", type="password")
+if senha_digitada != senha_correta:
+    st.warning("Senha incorreta. Acesso negado.")
     st.stop()
 
 # Menu lateral
