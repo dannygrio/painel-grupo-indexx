@@ -27,21 +27,17 @@ if response.status_code == 200:
     dados = response.json()
     st.write("🔍 Conteúdo recebido da API:", dados)  # debug temporário
 
-    if isinstance(dados, dict) and "bank_billets" in dados:
-        boletos_raw = dados
-    else:
-        st.error("❌ Estrutura inesperada da resposta da API.")
-        st.stop()
+    boletos_raw = response.json()
 
     # Transforma em DataFrame
     boletos = pd.DataFrame([{
-        "Nome": b.get("customer", {}).get("name", ""),
-        "CPF/CNPJ": b.get("customer", {}).get("cnpj_cpf", ""),
-        "Status": b.get("status", ""),
-        "Valor": float(b.get("amount", 0)) / 100,
-        "Data de Vencimento": b.get("due_date", ""),
-        "Data de Pagamento": b.get("paid_at", "")
-    } for b in boletos_raw])
+    "Nome": b.get("customer_person_name", ""),
+    "CPF/CNPJ": b.get("customer_cnpj_cpf", ""),
+    "Status": b.get("status", ""),
+    "Valor": float(b.get("amount", 0)) / 100,
+    "Data de Vencimento": b.get("expire_at", ""),
+    "Data de Pagamento": b.get("paid_at", "")
+} for b in boletos_raw])
 
 else:
     st.error("Erro ao acessar a API da Kobana.")
