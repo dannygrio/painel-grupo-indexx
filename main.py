@@ -1,9 +1,24 @@
 import streamlit as st
 import pandas as pd
-import requests
 from datetime import datetime
+import requests
+
+# Título e login
+st.title("🔐 Painel Interno – Gestão Grupo Indexx")
+
+senha_digitada = st.text_input("Digite a senha de acesso", type="password")
+
+if "auth" not in st.secrets or "senha" not in st.secrets["auth"]:
+    st.error("⚠️ Senha não configurada corretamente no secrets.")
+    st.stop()
 
 senha_correta = st.secrets["auth"]["senha"]
+
+if senha_digitada != senha_correta:
+    st.warning("Senha incorreta. Acesso negado.")
+    st.stop()
+
+# Se chegou aqui, a senha está correta, prossegue para a API
 KOBANA_API_KEY = st.secrets["kobana"]["api_token"]
 
 headers = {
@@ -11,7 +26,6 @@ headers = {
     "Authorization": f"Bearer {KOBANA_API_KEY}"
 }
 
-# Requisição para obter boletos da Kobana
 url = "https://api.kobana.com.br/v1/bank_billets"
 params = {
     "per_page": 100,
@@ -23,15 +37,15 @@ response = requests.get(url, headers=headers, params=params)
 
 if response.status_code == 200:
     dados = response.json()
-    st.write("🔍 Conteúdo recebido da API:", dados)  # debug temporário
 
-    if isinstance(dados, list):
+    if isinstance(dados, dict) and "bank_billets" in dados:
+        boletos_raw = dados["bank_billets"]
+    elif isinstance(dados, list):
         boletos_raw = dados
     else:
         st.error("❌ Estrutura inesperada da resposta da API.")
         st.stop()
 
-    # Transforma em DataFrame
     boletos = pd.DataFrame([{
         "Nome": b.get("customer_person_name", ""),
         "CPF/CNPJ": b.get("customer_cnpj_cpf", ""),
@@ -41,16 +55,10 @@ if response.status_code == 200:
         "Data de Pagamento": b.get("paid_at", "")
     } for b in boletos_raw])
 
+    # st.write("🔍 Conteúdo recebido da API:", boletos_raw)  # pode comentar se quiser esconder
+
 else:
     st.error("Erro ao acessar a API da Kobana.")
-    st.stop()
-
-# Título e login
-st.title("🔐 Painel Interno – Gestão Grupo Indexx")
-senha_digitada = st.text_input("Digite a senha de acesso", type="password")
-
-if senha_digitada != senha_correta:
-    st.warning("Senha incorreta. Acesso negado.")
     st.stop()
 
 # Menu lateral
@@ -77,14 +85,12 @@ if menu == "📊 Resumo Geral":
     st.metric("Valor Total Pago", f"R$ {total_pago:,.2f}".replace(".", ","))
     st.metric("Boletos em Aberto", abertos)
 
-# Cancelar assinatura
 elif menu == "🧾 Cancelar Assinatura":
     st.subheader("🧾 Cancelar Assinatura")
     documento = st.text_input("CPF ou CNPJ do cliente")
     if st.button("Cancelar assinatura"):
         st.success(f"Assinatura de {documento} cancelada com sucesso (simulado).")
 
-# Deletar boletos
 elif menu == "💣 Deletar Boletos":
     st.subheader("💣 Deletar Boletos (Simulado)")
     documento = st.text_input("CPF ou CNPJ do cliente")
@@ -94,7 +100,6 @@ elif menu == "💣 Deletar Boletos":
         if st.button("Deletar todos os boletos (simulado)"):
             st.success(f"Boletos de {documento} deletados com sucesso (simulado).")
 
-# Relatório de clientes com 3 boletos vencidos
 elif menu == "🚨 Clientes com 3 Boletos Vencidos":
     st.subheader("🚨 Clientes com 3 Boletos Vencidos")
     vencidos = boletos[boletos["Status"] == "Vencido"]
@@ -104,7 +109,6 @@ elif menu == "🚨 Clientes com 3 Boletos Vencidos":
     st.dataframe(resultado[["Nome", "CPF/CNPJ"]].drop_duplicates())
     st.download_button("📥 Baixar Excel", data=resultado.to_csv(index=False), file_name="clientes_com_3_vencidos.csv", mime="text/csv")
 
-# Relatório de pagamentos
 elif menu == "📅 Relatório de Pagamentos":
     st.subheader("📅 Relatório de Boletos Pagos")
     pagos = boletos[boletos["Status"] == "Pago"]
