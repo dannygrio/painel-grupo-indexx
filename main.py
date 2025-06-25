@@ -1,8 +1,7 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
 import requests
-import pandas as pd
+from datetime import datetime
 
 senha_correta = st.secrets["auth"]["senha"]
 KOBANA_API_KEY = st.secrets["kobana"]["api_token"]
@@ -14,11 +13,10 @@ headers = {
 
 # Requisição para obter boletos da Kobana
 url = "https://api.kobana.com.br/v1/bank_billets"
-
 params = {
-    "per_page": 100,  # até 100 boletos por página
+    "per_page": 100,
     "page": 1,
-    "sort": "-created_at"  # mais recentes primeiro
+    "sort": "-created_at"
 }
 
 response = requests.get(url, headers=headers, params=params)
@@ -27,17 +25,21 @@ if response.status_code == 200:
     dados = response.json()
     st.write("🔍 Conteúdo recebido da API:", dados)  # debug temporário
 
-    boletos_raw = response.json()
+    if isinstance(dados, list):
+        boletos_raw = dados
+    else:
+        st.error("❌ Estrutura inesperada da resposta da API.")
+        st.stop()
 
     # Transforma em DataFrame
     boletos = pd.DataFrame([{
-    "Nome": b.get("customer_person_name", ""),
-    "CPF/CNPJ": b.get("customer_cnpj_cpf", ""),
-    "Status": b.get("status", ""),
-    "Valor": float(b.get("amount", 0)) / 100,
-    "Data de Vencimento": b.get("expire_at", ""),
-    "Data de Pagamento": b.get("paid_at", "")
-} for b in boletos_raw])
+        "Nome": b.get("customer_person_name", ""),
+        "CPF/CNPJ": b.get("customer_cnpj_cpf", ""),
+        "Status": b.get("status", ""),
+        "Valor": float(b.get("amount", 0)) / 100,
+        "Data de Vencimento": b.get("expire_at", ""),
+        "Data de Pagamento": b.get("paid_at", "")
+    } for b in boletos_raw])
 
 else:
     st.error("Erro ao acessar a API da Kobana.")
@@ -45,18 +47,18 @@ else:
 
 # Título e login
 st.title("🔐 Painel Interno – Gestão Grupo Indexx")
-
 senha_digitada = st.text_input("Digite a senha de acesso", type="password")
+
 if senha_digitada != senha_correta:
     st.warning("Senha incorreta. Acesso negado.")
     st.stop()
 
 # Menu lateral
 menu = st.sidebar.selectbox("Selecione a função", [
-    "📊 Resumo Geral", 
-    "🧾 Cancelar Assinatura", 
-    "💣 Deletar Boletos", 
-    "🚨 Clientes com 3 Boletos Vencidos", 
+    "📊 Resumo Geral",
+    "🧾 Cancelar Assinatura",
+    "💣 Deletar Boletos",
+    "🚨 Clientes com 3 Boletos Vencidos",
     "📅 Relatório de Pagamentos"
 ])
 
