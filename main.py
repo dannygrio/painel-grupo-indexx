@@ -25,7 +25,13 @@ response = requests.get(url, headers=headers, params=params)
 
 if response.status_code == 200:
     dados = response.json()
-    boletos_raw = dados["bank_billets"]
+    st.write("🔍 Conteúdo recebido da API:", dados)  # debug temporário
+
+    if isinstance(dados, dict) and "bank_billets" in dados:
+        boletos_raw = dados["bank_billets"]
+    else:
+        st.error("❌ Estrutura inesperada da resposta da API.")
+        st.stop()
 
     # Transforma em DataFrame
     boletos = pd.DataFrame([{
