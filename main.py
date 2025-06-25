@@ -28,7 +28,7 @@ if response.status_code == 200:
     st.write("🔍 Conteúdo recebido da API:", dados)  # debug temporário
 
     if isinstance(dados, dict) and "bank_billets" in dados:
-        boletos_raw = dados["bank_billets"]
+        boletos_raw = dados
     else:
         st.error("❌ Estrutura inesperada da resposta da API.")
         st.stop()
