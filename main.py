@@ -37,7 +37,7 @@ if response.status_code != 200:
     st.stop()
 
 dados = response.json()
-boletos_raw = dados.get("bank_billets", [])
+boletos_raw = dados if isinstance(dados, list) else dados.get("bank_billets", [])
 boletos = pd.DataFrame([{
     "Nome": b.get("customer_person_name", ""),
     "CPF/CNPJ": b.get("customer_cnpj_cpf", ""),
