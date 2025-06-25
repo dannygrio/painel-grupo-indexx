@@ -12,15 +12,34 @@ headers = {
     "Authorization": f"Bearer {KOBANA_API_KEY}"
 }
 
-# Simulação de dados (normalmente viria da API Kobana)
-boletos = pd.DataFrame({
-    "Nome": ["João Silva", "Ana Lima", "Carlos Souza", "João Silva", "Ana Lima", "Carlos Souza", "João Silva"],
-    "CPF/CNPJ": ["123.456.789-00", "234.567.890-00", "345.678.901-00", "123.456.789-00", "234.567.890-00", "345.678.901-00", "123.456.789-00"],
-    "Status": ["Vencido", "Vencido", "Pago", "Vencido", "Pago", "Vencido", "Vencido"],
-    "Valor": [200.00, 150.00, 300.00, 180.00, 150.00, 210.00, 220.00],
-    "Data de Vencimento": ["2025-06-01", "2025-06-01", "2025-06-01", "2025-06-05", "2025-06-05", "2025-06-06", "2025-06-07"],
-    "Data de Pagamento": ["", "", "2025-06-01", "", "2025-06-05", "", ""]
-})
+# Requisição para obter boletos da Kobana
+url = "https://api.kobana.com.br/v1/bank_billets"
+
+params = {
+    "per_page": 100,  # até 100 boletos por página
+    "page": 1,
+    "sort": "-created_at"  # mais recentes primeiro
+}
+
+response = requests.get(url, headers=headers, params=params)
+
+if response.status_code == 200:
+    dados = response.json()
+    boletos_raw = dados["bank_billets"]
+
+    # Transforma em DataFrame
+    boletos = pd.DataFrame([{
+        "Nome": b.get("customer", {}).get("name", ""),
+        "CPF/CNPJ": b.get("customer", {}).get("cnpj_cpf", ""),
+        "Status": b.get("status", ""),
+        "Valor": float(b.get("amount", 0)) / 100,
+        "Data de Vencimento": b.get("due_date", ""),
+        "Data de Pagamento": b.get("paid_at", "")
+    } for b in boletos_raw])
+
+else:
+    st.error("Erro ao acessar a API da Kobana.")
+    st.stop()
 
 # Título e login
 st.title("🔐 Painel Interno – Gestão Grupo Indexx")
