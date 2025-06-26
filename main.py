@@ -1,118 +1,94 @@
-# Painel Executivo Grupo Indexx – Boletos Kobana – Versão 1.0 (26/06/2025)
-
 import streamlit as st
 import pandas as pd
 import requests
 from datetime import datetime, timedelta
 
-# Configurações
 st.set_page_config(page_title="Painel Executivo – Grupo Indexx", layout="wide")
 st.title("📊 Painel Executivo – Boletos Kobana")
 
 # Login
-if "logado" not in st.session_state:
-    st.session_state["logado"] = False
-if not st.session_state["logado"]:
-    senha = st.text_input("Digite a senha de acesso", type="password")
-    if senha == st.secrets["auth"]["senha"]:
-        st.session_state["logado"] = True
-        st.rerun()
-    else:
-        st.stop()
-
-# Token via secrets
-KOBANA_API_KEY = st.secrets["kobana"]["api_token"]
-headers = {
-    "Authorization": f"Bearer {KOBANA_API_KEY}",
-    "Content-Type": "application/json"
-}
-
-# Buscar boletos com paginação
-@st.cache_data(ttl=600)
-def buscar_boletos():
-    boletos = []
-    page = 1
-    while True:
-        r = requests.get(
-            "https://api.kobana.com.br/v1/bank_billets",
-            headers=headers,
-            params={"per_page": 100, "page": page, "sort": "-created_at"},
-            timeout=10
-        )
-        if r.status_code != 200:
-            raise Exception(f"Erro {r.status_code}: {r.text}")
-        data = r.json()
-        pagina = data if isinstance(data, list) else data.get("bank_billets", [])
-        if not pagina:
-            break
-        boletos.extend(pagina)
-        if len(pagina) < 100:
-            break
-        page += 1
-    return boletos
-
-# Carrega boletos
-try:
-    dados = buscar_boletos()
-except Exception as e:
-    st.error(f"Erro ao buscar dados: {e}")
+senha_correta = st.secrets["auth"]["senha"]
+senha = st.text_input("Digite a senha para acessar o painel", type="password")
+if senha != senha_correta:
     st.stop()
 
-# Transforma em DataFrame
-df = pd.DataFrame([{
+# Buscar boletos
+@st.cache_data(show_spinner="🔄 Carregando boletos da API...")
+def buscar_boletos():
+    token = st.secrets["kobana"]["api_token"]
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+
+    all_boletos = []
+    page = 1
+    while True:
+        url = f"https://api.kobana.com.br/v1/bank_billets"
+        params = {
+            "page": page,
+            "per_page": 100
+        }
+        resp = requests.get(url, headers=headers, params=params)
+        if resp.status_code != 200:
+            st.error(f"Erro {resp.status_code} ao buscar página {page}")
+            break
+
+        data = resp.json()
+        if not isinstance(data, list) or not data:
+            break
+        all_boletos.extend(data)
+
+        if len(data) < 100:
+            break
+        page += 1
+
+    return all_boletos
+
+boletos_raw = buscar_boletos()
+
+# Transformar em DataFrame
+boletos = pd.DataFrame([{
     "Nome": b.get("customer_person_name", ""),
     "CPF/CNPJ": b.get("customer_cnpj_cpf", ""),
-    "Status API": b.get("status", ""),
+    "Status": b.get("status", ""),
     "Valor": float(b.get("amount", 0)) / 100,
-    "Vencimento": b.get("expire_at"),
-    "Pago em": b.get("paid_at")
-} for b in dados])
+    "Vencimento": b.get("due_date", ""),
+    "Pagamento": b.get("paid_at", "")
+} for b in boletos_raw])
 
-# Converte datas
-df["Vencimento"] = pd.to_datetime(df["Vencimento"], errors="coerce")
-df["Pago em"] = pd.to_datetime(df["Pago em"], errors="coerce")
+# Converter datas
+boletos["Vencimento"] = pd.to_datetime(boletos["Vencimento"], errors="coerce")
+boletos["Pagamento"] = pd.to_datetime(boletos["Pagamento"], errors="coerce")
 
-# Tradução de status para exibição
-df["Status"] = df["Status API"].map({
-    "opened": "Em aberto",
-    "paid": "Pago",
-    "overdue": "Vencido",
-    "canceled": "Cancelado"
-}).fillna(df["Status API"])
+# Análises
+total = len(boletos)
+pagos = boletos[boletos["Status"] == "paid"]
+vencidos = boletos[boletos["Status"] == "overdue"]
+abertos = boletos[boletos["Status"] == "opened"]
+ontem = datetime.now().date() - timedelta(days=1)
+pagos_ontem = pagos[pagos["Pagamento"].dt.date == ontem]
 
-# Filtros de análise
-hoje = datetime.now().date()
-ontem = hoje - timedelta(days=1)
-inicio_mes = hoje.replace(day=1)
+# Clientes com 3 vencidos
+contagem = vencidos["CPF/CNPJ"].value_counts()
+cpf_3_vencidos = contagem[contagem == 3].index.tolist()
+clientes_3_vencidos = vencidos[vencidos["CPF/CNPJ"].isin(cpf_3_vencidos)][["Nome", "CPF/CNPJ"]].drop_duplicates()
 
-pagos = df[df["Status API"] == "paid"]
-vencidos = df[df["Status API"] == "overdue"]
-abertos = df[df["Status API"] == "opened"]
-pagos_ontem = pagos[pagos["Pago em"].dt.date == ontem]
-pagos_mes = pagos[pagos["Pago em"].dt.date >= inicio_mes]
-
-# Contagem de clientes com 3 boletos vencidos
-vencidos_c3 = vencidos["CPF/CNPJ"].value_counts()
-clientes_c3 = vencidos[vencidos["CPF/CNPJ"].isin(vencidos_c3[vencidos_c3 == 3].index)]
-clientes_c3 = clientes_c3[["Nome", "CPF/CNPJ"]].drop_duplicates()
-
-# Dashboard
+# Métricas
 col1, col2, col3 = st.columns(3)
-col1.metric("📄 Total de Boletos", len(df))
-col2.metric("💰 Boletos Pagos", len(pagos))
-col3.metric("📬 Em Aberto", len(abertos))
+with col1:
+    st.metric("📄 Total de Boletos", total)
+    st.metric("⚠️ Vencidos", len(vencidos))
+with col2:
+    st.metric("💰 Boletos Pagos", len(pagos))
+    st.metric("📅 Pagos Ontem", len(pagos_ontem))
+with col3:
+    st.metric("👥 Em Aberto", len(abertos))
+    st.metric("🗓️ Valor Pago no Mês", f"R$ {pagos[pagos['Pagamento'].dt.month == datetime.now().month]['Valor'].sum():,.2f}".replace('.', ','))
 
-col4, col5, col6 = st.columns(3)
-col4.metric("⚠️ Vencidos", len(vencidos))
-col5.metric("📆 Pagos Ontem", len(pagos_ontem))
-col6.metric("📅 Valor Pago no Mês", f"R$ {pagos_mes['Valor'].sum():,.2f}".replace(".", ","))
+st.divider()
 
-st.markdown("---")
+# Clientes com 3 boletos vencidos
 st.subheader("🚨 Clientes com 3 Boletos Vencidos")
-st.dataframe(clientes_c3)
-st.download_button("📥 Baixar lista (CSV)", clientes_c3.to_csv(index=False), file_name="clientes_3_vencidos.csv")
-
-st.markdown("---")
-st.subheader("📋 Todos os Boletos (com status traduzido)")
-st.dataframe(df.drop(columns=["Status API"]))
-st.download_button("📥 Baixar todos os boletos (CSV)", df.to_csv(index=False), file_name="boletos_completos.csv")
+st.dataframe(clientes_3_vencidos, use_container_width=True)
+st.download_button("📥 Baixar lista (CSV)", data=clientes_3_vencidos.to_csv(index=False), file_name="clientes_com_3_boletos_vencidos.csv")
