@@ -1,21 +1,21 @@
 import streamlit as st
 import pandas as pd
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime
 
 st.set_page_config(page_title="Painel Executivo – Grupo Indexx", layout="wide")
-st.title("📊 Painel Executivo – Boletos Kobana")
+st.title("📊 Painel Executivo – Boletos Ativos (Kobana)")
 
 # Login
 senha_correta = st.secrets["auth"]["senha"]
 senha = st.text_input("Digite a senha para acessar o painel", type="password")
 if senha != senha_correta:
-    if senha != "":
-        st.error("Senha incorreta. Tente novamente.")
+    if senha:
+        st.error("Senha incorreta.")
     st.stop()
 
-# Buscar boletos
-@st.cache_data(show_spinner="🔄 Carregando boletos da API...")
+# Buscar boletos ativos
+@st.cache_data(show_spinner="🔄 Buscando boletos ativos...")
 def buscar_boletos():
     token = st.secrets["kobana"]["api_token"]
     headers = {
@@ -43,48 +43,43 @@ def buscar_boletos():
 
 boletos_raw = buscar_boletos()
 
-# Transformar em DataFrame
+# Criar DataFrame com boletos ativos
 boletos = pd.DataFrame([{
     "Nome": b.get("customer_person_name", ""),
     "CPF/CNPJ": b.get("customer_cnpj_cpf", ""),
     "Status": b.get("status", ""),
-    "Valor": float(b.get("amount", 0)) / 100,
+    "Valor (R$)": float(b.get("amount", 0)) / 100,
     "Vencimento": b.get("due_date", ""),
-    "Pagamento": b.get("paid_at", "")
-} for b in boletos_raw])
+    "Tag": ", ".join(b.get("tags", [])) if isinstance(b.get("tags", []), list) else b.get("tags", "")
+} for b in boletos_raw if b.get("status") in ["opened", "overdue"]])
 
 # Converter datas
 boletos["Vencimento"] = pd.to_datetime(boletos["Vencimento"], errors="coerce")
-boletos["Pagamento"] = pd.to_datetime(boletos["Pagamento"], errors="coerce")
 
-# Análises
-total = len(boletos)
-pagos = boletos[boletos["Status"] == "paid"]
-vencidos = boletos[boletos["Status"] == "overdue"]
-abertos = boletos[boletos["Status"] == "opened"]
-ontem = datetime.now().date() - timedelta(days=1)
-pagos_ontem = pagos[pagos["Pagamento"].dt.date == ontem]
+# Separar status
+boletos_opened = boletos[boletos["Status"] == "opened"]
+boletos_overdue = boletos[boletos["Status"] == "overdue"]
+total_ativos = len(boletos)
+percent_inadimplencia = (len(boletos_overdue) / total_ativos * 100) if total_ativos > 0 else 0
 
-# Clientes com 3 vencidos
-contagem = vencidos["CPF/CNPJ"].value_counts()
-cpf_3_vencidos = contagem[contagem == 3].index.tolist()
-clientes_3_vencidos = vencidos[vencidos["CPF/CNPJ"].isin(cpf_3_vencidos)][["Nome", "CPF/CNPJ"]].drop_duplicates()
+# Clientes com 3 boletos vencidos
+contagem_vencidos = boletos_overdue["CPF/CNPJ"].value_counts()
+cpf_criticos = contagem_vencidos[contagem_vencidos >= 3].index.tolist()
+clientes_criticos = boletos_overdue[boletos_overdue["CPF/CNPJ"].isin(cpf_criticos)]
+clientes_criticos = clientes_criticos[["Nome", "CPF/CNPJ"]].drop_duplicates()
 
-# Métricas
+# Indicadores
 col1, col2, col3 = st.columns(3)
-with col1:
-    st.metric("📄 Total de Boletos", total)
-    st.metric("⚠️ Vencidos", len(vencidos))
-with col2:
-    st.metric("💰 Boletos Pagos", len(pagos))
-    st.metric("📅 Pagos Ontem", len(pagos_ontem))
-with col3:
-    st.metric("👥 Em Aberto", len(abertos))
-    st.metric("🗓️ Valor Pago no Mês", f"R$ {pagos[pagos['Pagamento'].dt.month == datetime.now().month]['Valor'].sum():,.2f}".replace('.', ','))
+col1.metric("📬 Boletos em Aberto", len(boletos_opened))
+col2.metric("⚠️ Boletos Vencidos", len(boletos_overdue))
+col3.metric("📊 Inadimplência Ativa", f"{percent_inadimplencia:.2f}%")
 
-st.divider()
-
-# Tabela de inadimplentes críticos
+st.markdown("---")
 st.subheader("🚨 Clientes com 3 Boletos Vencidos")
-st.dataframe(clientes_3_vencidos, use_container_width=True)
-st.download_button("📥 Baixar lista (CSV)", data=clientes_3_vencidos.to_csv(index=False), file_name="clientes_com_3_boletos_vencidos.csv")
+st.dataframe(clientes_criticos, use_container_width=True)
+st.download_button("📥 Baixar lista CSV", data=clientes_criticos.to_csv(index=False), file_name="clientes_com_3_vencidos.csv")
+
+st.markdown("---")
+st.subheader("📋 Boletos Ativos (Opened + Overdue)")
+st.dataframe(boletos, use_container_width=True)
+st.download_button("📥 Exportar todos os boletos (CSV)", data=boletos.to_csv(index=False), file_name="boletos_ativos.csv")
