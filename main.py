@@ -1,4 +1,4 @@
-# Painel Kobana – Versão 1.3.0 – Atualizado em 26/06/2025 por Danny
+# Painel Kobana – Versão 1.3.1 – Atualizado em 26/06/2025 por Danny
 
 import streamlit as st
 import pandas as pd
@@ -23,7 +23,16 @@ if not st.session_state["logado"]:
         st.warning("Senha incorreta.")
     st.stop()
 
-# Função para traduzir status
+# Token via secrets
+KOBANA_API_KEY = st.secrets["kobana"]["api_token"]
+
+headers = {
+    "Authorization": f"Bearer {KOBANA_API_KEY}",  # <- CORRETO no seu ambiente
+    "Content-Type": "application/json",
+    "User-Agent": "GrupoIndexxApp/1.3.1"
+}
+
+# Traduz status da API
 def traduz_status(status):
     return {
         "opened": "Em Aberto",
@@ -32,15 +41,7 @@ def traduz_status(status):
         "canceled": "Cancelado"
     }.get(status, status)
 
-# Token seguro via secrets
-token = st.secrets["kobana"]["api_token"]
-headers = {
-    "Authorization": f"Token token={token}",
-    "Content-Type": "application/json",
-    "User-Agent": "GrupoIndexxApp/1.3"
-}
-
-# Busca boletos paginando corretamente
+# Busca boletos
 @st.cache_data(ttl=3600)
 def buscar_boletos():
     boletos = []
@@ -48,7 +49,7 @@ def buscar_boletos():
     while True:
         url = "https://api.kobana.com.br/v1/bank_billets"
         params = {"per_page": 100, "page": pagina, "sort": "-created_at"}
-        r = requests.get(url, headers=headers, params=params)
+        r = requests.get(url, headers=headers, params=params, timeout=10)
         if r.status_code != 200:
             st.error(f"Erro {r.status_code}: {r.text}")
             return []
@@ -61,15 +62,12 @@ def buscar_boletos():
         pagina += 1
     return boletos
 
-# Carrega boletos e converte
 with st.spinner("🔄 Carregando boletos..."):
     dados_api = buscar_boletos()
 
-# Modo debug opcional
 if st.checkbox("🔍 Mostrar resposta bruta da API"):
     st.json(dados_api)
 
-# Evita erro se API estiver vazia
 if not dados_api:
     st.warning("Nenhum boleto retornado da API. Verifique o token.")
     st.stop()
