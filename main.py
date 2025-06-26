@@ -1,121 +1,117 @@
-# Simulador Kobana - Versão 1.0.0 – Atualizado em 25/06/2025 por Danny
-
 import streamlit as st
 import pandas as pd
+from datetime import datetime
 import requests
+import pandas as pd
 
-# Título
-st.set_page_config(page_title="Painel Grupo Indexx", layout="centered")
-st.markdown("## 🔐 Painel Interno – Gestão Grupo Indexx")
-
-# Login
-if "logado" not in st.session_state:
-    st.session_state["logado"] = False
-
-if not st.session_state["logado"]:
-    senha_digitada = st.text_input("Digite a senha de acesso", type="password")
-    if "auth" not in st.secrets or "senha" not in st.secrets["auth"]:
-        st.error("❌ Senha não configurada corretamente no arquivo de secrets.")
-        st.stop()
-    elif senha_digitada == st.secrets["auth"]["senha"]:
-        st.session_state["logado"] = True
-        st.experimental_rerun()
-    elif senha_digitada:
-        st.warning("Senha incorreta. Acesso negado.")
-    st.stop()
-
-# API Token
+senha_correta = st.secrets["auth"]["senha"]
 KOBANA_API_KEY = st.secrets["kobana"]["api_token"]
+
 headers = {
     "Content-Type": "application/json",
-    "Authorization": f"Bearer {KOBANA_API_KEY}",
-    "User-Agent": "GrupoIndexxApp/1.0"
+    "Authorization": f"Bearer {KOBANA_API_KEY}"
 }
 
-# Busca os boletos (várias páginas se necessário)
-def buscar_boletos():
-    boletos = []
-    pagina = 1
-    while True:
-        url = "https://api.kobana.com.br/v1/bank_billets"
-        params = {"per_page": 100, "page": pagina, "sort": "-created_at"}
-        r = requests.get(url, headers=headers, params=params)
-        if r.status_code != 200:
-            st.error("❌ Erro ao acessar a API da Kobana.")
-            st.stop()
-        dados = r.json()
-        if not dados.get("bank_billets"):
-            break
-        boletos.extend(dados["bank_billets"])
-        if len(dados["bank_billets"]) < 100:
-            break
-        pagina += 1
-    return boletos
+# Requisição para obter boletos da Kobana
+url = "https://api.kobana.com.br/v1/bank_billets"
 
-# Carrega os boletos e transforma em DataFrame
-boletos_raw = buscar_boletos()
-boletos = pd.DataFrame([{
-    "Nome": b.get("customer_person_name"),
-    "CPF/CNPJ": b.get("customer_cnpj_cpf"),
-    "Status": b.get("status"),
-    "Valor": float(b.get("amount", 0)) / 100,
-    "Data de Vencimento": b.get("expire_at"),
-    "Data de Pagamento": b.get("paid_at")
-} for b in boletos_raw])
+params = {
+    "per_page": 100,  # até 100 boletos por página
+    "page": 1,
+    "sort": "-created_at"  # mais recentes primeiro
+}
 
-# Sidebar
+response = requests.get(url, headers=headers, params=params)
+
+if response.status_code == 200:
+    dados = response.json()
+    st.write("🔍 Conteúdo recebido da API:", dados)  # debug temporário
+
+    if isinstance(dados, dict) and "bank_billets" in dados:
+        boletos_raw = dados
+    else:
+        st.error("❌ Estrutura inesperada da resposta da API.")
+        st.stop()
+
+    # Transforma em DataFrame
+    boletos = pd.DataFrame([{
+        "Nome": b.get("customer", {}).get("name", ""),
+        "CPF/CNPJ": b.get("customer", {}).get("cnpj_cpf", ""),
+        "Status": b.get("status", ""),
+        "Valor": float(b.get("amount", 0)) / 100,
+        "Data de Vencimento": b.get("due_date", ""),
+        "Data de Pagamento": b.get("paid_at", "")
+    } for b in boletos_raw])
+
+else:
+    st.error("Erro ao acessar a API da Kobana.")
+    st.stop()
+
+# Título e login
+st.title("🔐 Painel Interno – Gestão Grupo Indexx")
+
+senha_digitada = st.text_input("Digite a senha de acesso", type="password")
+if senha_digitada != senha_correta:
+    st.warning("Senha incorreta. Acesso negado.")
+    st.stop()
+
+# Menu lateral
 menu = st.sidebar.selectbox("Selecione a função", [
-    "📊 Resumo Geral",
-    "🚨 Clientes com 3 Boletos Vencidos",
-    "🧾 Cancelar Assinatura (simulado)",
-    "💣 Deletar Boletos (simulado)",
+    "📊 Resumo Geral", 
+    "🧾 Cancelar Assinatura", 
+    "💣 Deletar Boletos", 
+    "🚨 Clientes com 3 Boletos Vencidos", 
     "📅 Relatório de Pagamentos"
 ])
 
-# RESUMO
+# Resumo geral
 if menu == "📊 Resumo Geral":
-    total = len(boletos)
-    pagos = boletos[boletos["Status"] == "paid"]
-    vencidos = boletos[boletos["Status"] == "expired"]
-    abertos = total - len(pagos) - len(vencidos)
+    total_boletos = len(boletos)
+    vencidos = boletos[boletos["Status"] == "Vencido"]
+    pagos = boletos[boletos["Status"] == "Pago"]
+    abertos = total_boletos - len(vencidos) - len(pagos)
+    total_pago = pagos["Valor"].sum()
+
     st.subheader("📊 Resumo Financeiro")
-    st.metric("Total de Boletos", total)
+    st.metric("Total de Boletos", total_boletos)
     st.metric("Boletos Vencidos", len(vencidos))
     st.metric("Boletos Pagos", len(pagos))
-    st.metric("Valor Total Pago", f"R$ {pagos['Valor'].sum():,.2f}".replace(".", ","))
+    st.metric("Valor Total Pago", f"R$ {total_pago:,.2f}".replace(".", ","))
     st.metric("Boletos em Aberto", abertos)
 
-# 3 BOLETOS VENCIDOS
-elif menu == "🚨 Clientes com 3 Boletos Vencidos":
-    vencidos = boletos[boletos["Status"] == "expired"]
-    contagem = vencidos["CPF/CNPJ"].value_counts()
-    cpf_cnpj_com_3 = contagem[contagem == 3].index
-    resultado = vencidos[vencidos["CPF/CNPJ"].isin(cpf_cnpj_com_3)]
-    st.dataframe(resultado[["Nome", "CPF/CNPJ"]].drop_duplicates())
-    st.download_button("📥 Baixar Excel", resultado.to_csv(index=False), "clientes_3_vencidos.csv")
-
-# CANCELAMENTO (Simulado)
-elif menu == "🧾 Cancelar Assinatura (simulado)":
+# Cancelar assinatura
+elif menu == "🧾 Cancelar Assinatura":
     st.subheader("🧾 Cancelar Assinatura")
-    doc = st.text_input("Digite o CPF ou CNPJ do cliente")
-    if st.button("Cancelar"):
-        st.success(f"Assinatura cancelada para {doc} (simulado)")
+    documento = st.text_input("CPF ou CNPJ do cliente")
+    if st.button("Cancelar assinatura"):
+        st.success(f"Assinatura de {documento} cancelada com sucesso (simulado).")
 
-# DELETAR (Simulado)
-elif menu == "💣 Deletar Boletos (simulado)":
-    st.subheader("💣 Deletar Boletos")
-    doc = st.text_input("Digite o CPF ou CNPJ")
-    if doc:
-        encontrados = boletos[boletos["CPF/CNPJ"] == doc]
-        st.dataframe(encontrados)
-        if st.button("Deletar todos (simulado)"):
-            st.success(f"Boletos de {doc} deletados (simulado)")
+# Deletar boletos
+elif menu == "💣 Deletar Boletos":
+    st.subheader("💣 Deletar Boletos (Simulado)")
+    documento = st.text_input("CPF ou CNPJ do cliente")
+    if documento:
+        boletos_cliente = boletos[boletos["CPF/CNPJ"] == documento]
+        st.dataframe(boletos_cliente)
+        if st.button("Deletar todos os boletos (simulado)"):
+            st.success(f"Boletos de {documento} deletados com sucesso (simulado).")
 
-# PAGAMENTOS
+# Relatório de clientes com 3 boletos vencidos
+elif menu == "🚨 Clientes com 3 Boletos Vencidos":
+    st.subheader("🚨 Clientes com 3 Boletos Vencidos")
+    vencidos = boletos[boletos["Status"] == "Vencido"]
+    contagem = vencidos["CPF/CNPJ"].value_counts()
+    clientes_com_3 = contagem[contagem == 3].index.tolist()
+    resultado = boletos[boletos["CPF/CNPJ"].isin(clientes_com_3)]
+    st.dataframe(resultado[["Nome", "CPF/CNPJ"]].drop_duplicates())
+    st.download_button("📥 Baixar Excel", data=resultado.to_csv(index=False), file_name="clientes_com_3_vencidos.csv", mime="text/csv")
+
+# Relatório de pagamentos
 elif menu == "📅 Relatório de Pagamentos":
-    pagos = boletos[boletos["Status"] == "paid"]
+    st.subheader("📅 Relatório de Boletos Pagos")
+    pagos = boletos[boletos["Status"] == "Pago"]
     pagos["Data de Pagamento"] = pd.to_datetime(pagos["Data de Pagamento"])
-    total = pagos["Valor"].sum()
-    st.metric("Total Pago", f"R$ {total:,.2f}".replace(".", ","))
+    total_pago = pagos["Valor"].sum()
+    st.metric("Total Pago no Período", f"R$ {total_pago:,.2f}".replace(".", ","))
     st.dataframe(pagos)
-    st.download_button("📥 Baixar CSV", pagos.to_csv(index=False), "boletos_pagos.csv")
+    st.download_button("📥 Baixar Pagamentos", data=pagos.to_csv(index=False), file_name="boletos_pagos.csv", mime="text/csv")
