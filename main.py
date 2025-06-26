@@ -10,6 +10,8 @@ st.title("📊 Painel Executivo – Boletos Kobana")
 senha_correta = st.secrets["auth"]["senha"]
 senha = st.text_input("Digite a senha para acessar o painel", type="password")
 if senha != senha_correta:
+    if senha != "":
+        st.error("Senha incorreta. Tente novamente.")
     st.stop()
 
 # Buscar boletos
@@ -24,25 +26,19 @@ def buscar_boletos():
     all_boletos = []
     page = 1
     while True:
-        url = f"https://api.kobana.com.br/v1/bank_billets"
-        params = {
-            "page": page,
-            "per_page": 100
-        }
+        url = "https://api.kobana.com.br/v1/bank_billets"
+        params = {"page": page, "per_page": 100}
         resp = requests.get(url, headers=headers, params=params)
         if resp.status_code != 200:
-            st.error(f"Erro {resp.status_code} ao buscar página {page}")
+            st.error(f"Erro {resp.status_code} ao buscar boletos")
             break
-
         data = resp.json()
         if not isinstance(data, list) or not data:
             break
         all_boletos.extend(data)
-
         if len(data) < 100:
             break
         page += 1
-
     return all_boletos
 
 boletos_raw = buscar_boletos()
@@ -88,7 +84,7 @@ with col3:
 
 st.divider()
 
-# Clientes com 3 boletos vencidos
+# Tabela de inadimplentes críticos
 st.subheader("🚨 Clientes com 3 Boletos Vencidos")
 st.dataframe(clientes_3_vencidos, use_container_width=True)
 st.download_button("📥 Baixar lista (CSV)", data=clientes_3_vencidos.to_csv(index=False), file_name="clientes_com_3_boletos_vencidos.csv")
