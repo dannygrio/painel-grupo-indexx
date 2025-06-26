@@ -1,99 +1,103 @@
-# Painel Executivo – Versão 26/06/2025 por Danny
+# Painel Executivo – Boletos Ativos (Kobana) – Versão 26/06/2025 por Danny
 
 import streamlit as st
 import pandas as pd
 import requests
 
-# Configuração do app
-st.set_page_config(page_title="Painel Executivo – Boletos Kobana", layout="centered")
-st.title("📊 Painel Executivo – Boletos Ativos (Kobana)")
+st.set_page_config(page_title="Painel Executivo – Grupo Indexx", layout="wide")
 
-# Login com senha armazenada no secrets
-senha_correta = st.secrets["auth"]["senha"]
-senha_digitada = st.text_input("Digite a senha para acessar o painel", type="password")
-if senha_digitada != senha_correta:
-    st.stop()
+# Título
+st.markdown("## 📊 Painel Executivo – Boletos Ativos (Kobana)")
 
-# Token e endpoint da API Kobana
-KOBANA_API_KEY = st.secrets["kobana"]["api_token"]
-headers = {
-    "Accept": "application/json",
-    "Authorization": f"Token {KOBANA_API_KEY}"
-}
+# Login
+if "logado" not in st.session_state:
+    st.session_state["logado"] = False
 
-# Paginação de boletos com status 'opened' e 'overdue'
-def buscar_boletos(status):
+if not st.session_state["logado"]:
+    senha_digitada = st.text_input("Digite a senha para acessar o painel", type="password")
+    if senha_digitada == st.secrets["auth"]["senha"]:
+        st.session_state["logado"] = True
+    else:
+        st.stop()
+
+# Função para buscar todos os boletos com paginação
+def buscar_boletos(token):
     boletos = []
-    pagina = 1
+    page = 1
     while True:
-        url = f"https://api.kobana.com.br/v1/bank_billets?status[]={status}&page={pagina}"
+        url = f"https://api.kobana.com.br/v1/bank_billets?status[]=opened&status[]=overdue&page={page}"
+        headers = {"Authorization": f"Token token={token}"}
         resposta = requests.get(url, headers=headers)
         if resposta.status_code != 200:
-            break
+            st.error("Erro ao buscar boletos.")
+            return []
         dados = resposta.json()
         boletos.extend(dados)
-        if len(dados) < 100:
+        if len(dados) < 50:
             break
-        pagina += 1
+        page += 1
     return boletos
 
-# Buscar boletos ativos (opened e overdue)
-boletos_abertos = buscar_boletos("opened")
-boletos_vencidos = buscar_boletos("overdue")
-ativos = boletos_abertos + boletos_vencidos
+# Coleta dos boletos
+token = st.secrets["kobana"]["api_token"]
+dados_boletos = buscar_boletos(token)
+df = pd.DataFrame(dados_boletos)
 
-# Exibir indicadores
+if df.empty:
+    st.warning("Nenhum boleto retornado pela API.")
+    st.stop()
+
+# Conversão e tratamento
+df["due_date"] = pd.to_datetime(df["due_date"])
+df["amount"] = df["amount"].astype(float) / 100
+df.rename(columns={
+    "customer_person_name": "Nome",
+    "customer_person_document": "CPF/CNPJ",
+    "status": "Status",
+    "amount": "Valor (R$)",
+    "due_date": "Vencimento",
+    "tags": "Tag"
+}, inplace=True)
+
+# Cálculos principais
+total_boletos = len(df)
+boletos_abertos = df[df["Status"] == "opened"]
+boletos_vencidos = df[df["Status"] == "overdue"]
+
+inadimplencia_ativa = len(boletos_vencidos) / total_boletos if total_boletos else 0
+
+# Exibição de métricas
 col1, col2, col3 = st.columns(3)
 col1.metric("👥 Boletos em Aberto", len(boletos_abertos))
 col2.metric("⚠️ Boletos Vencidos", len(boletos_vencidos))
+col3.metric("📊 Inadimplência Ativa", f"{inadimplencia_ativa:.2%}")
 
-# Calcular inadimplência ativa
-total_boletos_ativos = len(ativos)
-inadimplentes_pct = 0.0
-clientes_inadimplentes = pd.DataFrame()
-
-if boletos_vencidos:
-    df_vencidos = pd.DataFrame([{
-        "Nome": b["customer_person_name"],
-        "CPF/CNPJ": b["customer_person_document"]
-    } for b in boletos_vencidos])
-
-    inadimplentes = (
-        df_vencidos.groupby(["Nome", "CPF/CNPJ"])
-        .size()
-        .reset_index(name="Qtd Vencidos")
-    )
-    clientes_inadimplentes = inadimplentes[inadimplentes["Qtd Vencidos"] >= 3]
-    inadimplentes_pct = (len(clientes_inadimplentes) / total_boletos_ativos) * 100
-
-col3.metric("📊 Inadimplência Ativa", f"{inadimplentes_pct:.2f}%")
-
-# Tabela de clientes com 3 vencidos
+# Clientes com 3 boletos vencidos
 st.markdown("### 🚨 Clientes com 3 Boletos Vencidos")
-st.dataframe(clientes_inadimplentes[["Nome", "CPF/CNPJ"]], use_container_width=True)
-st.download_button(
-    "📥 Baixar lista CSV",
-    clientes_inadimplentes.to_csv(index=False).encode("utf-8"),
-    "clientes_inadimplentes.csv",
-    "text/csv"
-)
 
-# Tabela completa dos boletos ativos
+if not boletos_vencidos.empty:
+    grupo = boletos_vencidos.groupby(["Nome", "CPF/CNPJ"]).size().reset_index(name="Qtde Vencidos")
+    clientes_inadimplentes = grupo[grupo["Qtde Vencidos"] >= 3]
+
+    if not clientes_inadimplentes.empty:
+        st.dataframe(clientes_inadimplentes[["Nome", "CPF/CNPJ"]], use_container_width=True)
+        st.download_button(
+            "📥 Baixar lista CSV",
+            clientes_inadimplentes.to_csv(index=False).encode("utf-8"),
+            "clientes_inadimplentes.csv",
+            "text/csv"
+        )
+    else:
+        st.write("Nenhum cliente com 3 boletos vencidos no momento.")
+else:
+    st.write("Nenhum boleto vencido disponível no momento.")
+
+# Tabela completa de boletos ativos
 st.markdown("### 📋 Boletos Ativos (Opened + Overdue)")
-df_boletos = pd.DataFrame([{
-    "Nome": b["customer_person_name"],
-    "CPF/CNPJ": b["customer_person_document"],
-    "Status": b["status"],
-    "Valor (R$)": float(b["amount"]),
-    "Vencimento": b["expire_at"],
-    "Tag": b["tags"][0] if b["tags"] else ""
-} for b in ativos])
-
-st.dataframe(df_boletos, use_container_width=True)
-
+st.dataframe(df[["Nome", "CPF/CNPJ", "Status", "Valor (R$)", "Vencimento", "Tag"]], use_container_width=True)
 st.download_button(
     "📥 Exportar todos os boletos (CSV)",
-    df_boletos.to_csv(index=False).encode("utf-8"),
+    df.to_csv(index=False).encode("utf-8"),
     "boletos_ativos.csv",
     "text/csv"
 )
