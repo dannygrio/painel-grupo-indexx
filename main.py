@@ -1,13 +1,11 @@
-# main.py
-
 import streamlit as st
 import pandas as pd
 import requests
 from datetime import date, timedelta
 
 st.set_page_config(page_title="Painel Grupo Indexx", layout="wide")
-st.markdown("<h2 style='text-align:center'>🔐 Painel Interno – Gestão Grupo Indexx</h2>", unsafe_allow_html=True)
-st.markdown("")
+st.markdown("<h2 style='text-align:center'>🔐 Painel Interno – Gestão Grupo Indexx</h2>",
+            unsafe_allow_html=True)
 
 if "logado" not in st.session_state:
     st.session_state["logado"] = False
@@ -15,7 +13,7 @@ if "logado" not in st.session_state:
 if not st.session_state["logado"]:
     senha = st.text_input("Digite a senha de acesso", type="password")
     if "auth" not in st.secrets or "senha" not in st.secrets["auth"]:
-        st.error("Configure a senha em [auth] no secrets.toml")
+        st.error("Configure a senha em [auth] do secrets.toml")
     elif senha == st.secrets["auth"]["senha"]:
         st.session_state["logado"] = True
         st.rerun()
@@ -24,13 +22,12 @@ if not st.session_state["logado"]:
 
 @st.cache_data(show_spinner=False)
 def fetch_boletos(status_list, date_field=None, date_value=None):
-    cfg      = st.secrets.get("kobana", {})
-    api_key  = cfg.get("api_key")
-    base_url = cfg.get("base_url", "https://api.kobana.com.br/v1")
-    endpoint = cfg.get("endpoint", "/bank_billets")
-
+    cfg        = st.secrets["kobana"]
+    api_key    = cfg.get("api_key")
+    base_url   = cfg.get("base_url", "https://api.kobana.com.br/v1")
+    endpoint   = cfg.get("endpoint", "/bank_billets")
     if not api_key:
-        st.error("Configure api_key em [kobana] no secrets.toml")
+        st.error("Falta api_key em [kobana] no secrets.toml")
         return pd.DataFrame()
 
     url     = base_url.rstrip("/") + endpoint
@@ -44,10 +41,7 @@ def fetch_boletos(status_list, date_field=None, date_value=None):
         st.error(f"Endpoint não encontrado em {url}")
         return pd.DataFrame()
     if resp.status_code != 200:
-        try:
-            msg = resp.json().get("error", resp.text)
-        except:
-            msg = resp.text
+        msg = resp.json().get("error", resp.text)
         st.error(f"Erro ao obter boletos {msg}")
         return pd.DataFrame()
 
@@ -55,68 +49,67 @@ def fetch_boletos(status_list, date_field=None, date_value=None):
     df    = pd.json_normalize(items)
     df    = df.rename(columns={
         "customer_person_name": "Cliente",
-        "status":              "Status",
-        "expire_at":           "Vencimento",
-        "paid_at":             "Pago em",
-        "amount":              "Valor",
-        "tags":                "Etiqueta"
+        "customer_document":    "Documento",
+        "status":               "Status",
+        "expire_at":            "Vencimento",
+        "paid_at":              "Pago em",
+        "amount":               "Valor",
+        "tags":                 "Etiqueta"
     })
     return df
 
+def delete_subscription(cpf_cnpj):
+    cfg        = st.secrets["kobana"]
+    api_key    = cfg.get("api_key")
+    base_url   = cfg.get("base_url", "https://api.kobana.com.br/v1")
+    sub_ep     = cfg.get("sub_endpoint", "/subscriptions")
+    if not api_key:
+        st.error("Falta api_key em [kobana] no secrets.toml")
+        return
+
+    url     = base_url.rstrip("/") + sub_ep.strip("/") + f"/{cpf_cnpj}"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    resp = requests.delete(url, headers=headers, timeout=10)
+    if resp.status_code in (200, 204):
+        st.success(f"Assinatura de {cpf_cnpj} deletada com sucesso")
+    else:
+        msg = resp.json().get("error", resp.text)
+        st.error(f"Falha ao deletar assinatura {cpf_cnpj}: {msg}")
+
 if st.session_state["logado"]:
     st.success("✅ Acesso liberado")
-    menu = st.sidebar.radio("Navegação", ["Visao Geral", "Boletos", "Indicadores", "Configuracoes"])
+    menu = st.sidebar.radio("Navegação", [
+        "Clientes com 3 boletos vencidos",
+        "Deletar assinatura"
+    ])
 
     hoje  = date.today()
     ontem = (hoje - timedelta(days=1)).isoformat()
 
-    df_ao = fetch_boletos(["opened", "overdue"])
-    df_pg = fetch_boletos(["paid"], date_field="paid_at", date_value=ontem)
-
-    if menu == "Visao Geral":
-        st.subheader("Visao Geral")
-        if "Status" in df_ao.columns:
-            total_opened  = int((df_ao["Status"] == "opened").sum())
-            total_overdue = int((df_ao["Status"] == "overdue").sum())
+    if menu == "Clientes com 3 boletos vencidos":
+        df_ao = fetch_boletos(["overdue"])
+        if df_ao.empty or "Cliente" not in df_ao.columns:
+            st.info("Nenhum boleto vencido encontrado")
         else:
-            total_opened = total_overdue = 0
-        pagos_ontem = len(df_pg)
+            grp = (
+                df_ao
+                .groupby(["Cliente", "Documento"])
+                .size()
+                .reset_index(name="QtdeVencidos")
+            )
+            tres = grp[grp["QtdeVencidos"] >= 3]
+            if tres.empty:
+                st.info("Não há clientes com 3 ou mais boletos vencidos")
+            else:
+                st.dataframe(tres, use_container_width=True)
 
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Boletos Abertos", total_opened)
-        c2.metric("Boletos Vencidos", total_overdue)
-        c3.metric("Pagos Ontem", pagos_ontem)
+    else:  # deletar assinatura
+        st.subheader("Deletar assinatura por CPF ou CNPJ")
+        doc = st.text_input("Informe CPF ou CNPJ")
+        if st.button("Deletar assinatura"):
+            if doc.strip():
+                delete_subscription(doc.strip())
+            else:
+                st.warning("Informe um CPF ou CNPJ válido")
 
-    elif menu == "Boletos":
-        st.subheader("Boletos Ativos opened e overdue")
-        if df_ao.empty:
-            st.info("Nenhum boleto aberto ou vencido encontrado")
-        else:
-            st.dataframe(df_ao[["Cliente","Status","Vencimento","Valor","Etiqueta"]], use_container_width=True)
-
-    elif menu == "Indicadores":
-        st.subheader("Indicadores Avancados")
-        inad  = int((df_ao["Status"] == "overdue").sum()) if "Status" in df_ao.columns else 0
-        multi = int(df_ao.duplicated(subset=["Cliente"], keep=False).sum()) if "Cliente" in df_ao.columns else 0
-        fat   = 0
-        if "Valor" in df_ao.columns:
-            fat = df_ao["Valor"].replace(r"[R\$\s\.]", "", regex=True).astype(float).sum()
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Inadimplentes Criticos", inad)
-        col2.metric("Clientes com >1 Boleto", multi)
-        col3.metric("Faturamento Aberto R$", f"{fat:,.2f}")
-
-    else:
-        st.subheader("Configuracoes e Ajuda")
-        st.code("""
-[auth]
-senha      = "admin1234"
-
-[kobana]
-api_key    = "SEU_TOKEN_AQUI"
-base_url   = "https://api.kobana.com.br/v1"
-endpoint   = "/bank_billets"
-        """, language="toml")
-
-    st.markdown("")
-    st.caption("🔒 Painel restrito – Desenvolvido por Danny – Versao 1.0.0 – 02/07/2025")
+    st.caption("🔒 Desenvolvido por Danny – Versão 1.0.0 – 03/07/2025")
