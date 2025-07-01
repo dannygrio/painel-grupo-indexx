@@ -1,134 +1,118 @@
-# Painel Grupo Indexx – Versão 1.1.0 – Atualizado em 25/06/2025 por Danny
+# Simulador Kobana – Versão 1.0.0 – Atualizado em 01/07/2025 por Danny
 
 import streamlit as st
 import pandas as pd
 import requests
+from datetime import date, timedelta
 
-# Configuração do Streamlit
+# Configuração da página
 st.set_page_config(page_title="Painel Grupo Indexx", layout="wide")
+st.markdown("<h2 style='text-align: center;'>🔐 Painel Interno – Gestão Grupo Indexx</h2>", unsafe_allow_html=True)
+st.markdown("")
 
-# ----- LOGIN -----
+# Sessão de login
 if "logado" not in st.session_state:
     st.session_state["logado"] = False
 
 if not st.session_state["logado"]:
-    st.markdown("## 🔐 Painel Interno – Gestão Grupo Indexx")
-    senha_digitada = st.text_input("Digite a senha de acesso", type="password")
+    senha = st.text_input("Digite a senha de acesso", type="password")
     if "auth" not in st.secrets or "senha" not in st.secrets["auth"]:
-        st.error("❌ Senha não configurada corretamente no arquivo de secrets.")
-        st.stop()
-    elif senha_digitada == st.secrets["auth"]["senha"]:
+        st.error("Configuração de senha não encontrada.")
+    elif senha == st.secrets["auth"]["senha"]:
         st.session_state["logado"] = True
-        st.experimental_rerun()
-    elif senha_digitada:
-        st.warning("Senha incorreta. Acesso negado.")
-    st.stop()
+        st.rerun()
+    elif senha != "":
+        st.error("Senha incorreta.")
 
-# ----- SIDEBAR MENU FIXO -----
-st.sidebar.markdown("## 🗂️ Menu")
-menu = st.sidebar.radio("Escolha a função", [
-    "📊 Resumo Geral",
-    "🚨 Clientes com 3 Boletos Vencidos",
-    "🧾 Cancelar Assinatura (simulado)",
-    "💣 Deletar Boletos (simulado)",
-    "📅 Relatório de Pagamentos"
-], index=0)
+# Função genérica para buscar boletos da Kobana
+@st.cache_data(show_spinner=False)
+def fetch_boletos(status_list, date_field=None, date_value=None):
+    api_key = st.secrets["kobana"]["api_key"]
+    base_url = st.secrets["kobana"]["base_url"]
+    url = f"{base_url}/boletos"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    params = {"status": ",".join(status_list)}
+    if date_field and date_value:
+        params[date_field] = date_value
+    resp = requests.get(url, headers=headers, params=params, timeout=10)
+    if resp.status_code != 200:
+        st.error(f"Erro ao obter boletos: {resp.text}")
+        return pd.DataFrame()
+    data = resp.json()
+    items = data.get("items", data)
+    return pd.json_normalize(items)
 
-# ----- HEADER API -----
-KOBANA_API_KEY = st.secrets["kobana"]["api_token"]
-headers = {
-    "Content-Type": "application/json",
-    "Authorization": f"Bearer {KOBANA_API_KEY}",
-    "User-Agent": "GrupoIndexxApp/1.0"
-}
+# Conteúdo do painel após login
+if st.session_state["logado"]:
+    st.success("✅ Acesso liberado")
+    menu = st.sidebar.radio("Navegação", ["📊 Visão Geral", "📁 Boletos", "📉 Indicadores", "⚙️ Configurações"])
 
-# ----- FUNÇÃO BUSCAR BOLETOS -----
-@st.cache_data(show_spinner="🔄 Buscando boletos na Kobana...", ttl=300)
-def buscar_boletos():
-    boletos = []
-    pagina = 1
-    while True:
-        url = "https://api.kobana.com.br/v1/bank_billets"
-        params = {"per_page": 100, "page": pagina, "sort": "-created_at"}
-        resp = requests.get(url, headers=headers, params=params)
-        if resp.status_code != 200:
-            st.error(f"❌ Erro {resp.status_code} ao acessar a API da Kobana.")
-            st.stop()
-        dados = resp.json()
-        if not isinstance(dados, dict) or "bank_billets" not in dados:
-            break
-        boletos_lidos = dados["bank_billets"]
-        if not boletos_lidos:
-            break
-        boletos.extend(boletos_lidos)
-        if len(boletos_lidos) < 100:
-            break
-        pagina += 1
-    return boletos
+    # preparar datas
+    hoje = date.today()
+    ontem = (hoje - timedelta(days=1)).isoformat()
 
-# ----- DADOS -----
-boletos_raw = buscar_boletos()
-boletos = pd.DataFrame([{
-    "Nome": b.get("customer_person_name") or "",
-    "CPF/CNPJ": b.get("customer_cnpj_cpf") or "",
-    "Status": b.get("status") or "",
-    "Valor": float(b.get("amount", 0)) / 100 if b.get("amount") else 0,
-    "Data de Vencimento": b.get("expire_at") or "",
-    "Data de Pagamento": b.get("paid_at") or ""
-} for b in boletos_raw])
+    # buscar dados
+    df_ao = fetch_boletos(["opened", "overdue"])
+    df_pg = fetch_boletos(["paid"], date_field="paid_at", date_value=ontem)
 
-# --------- PAINEL PRINCIPAL ---------
+    # renomear colunas conforme necessidade
+    if not df_ao.empty:
+        df_ao = df_ao.rename(columns={
+            "customer_person_name": "Cliente",
+            "status": "Status",
+            "expire_at": "Vencimento",
+            "amount": "Valor",
+            "tags": "Etiqueta"
+        })
 
-st.markdown("## 🔐 Painel Interno – Gestão Grupo Indexx")
+    if not df_pg.empty:
+        df_pg = df_pg.rename(columns={
+            "customer_person_name": "Cliente",
+            "status": "Status",
+            "paid_at": "Pago em",
+            "amount": "Valor"
+        })
 
-# -- RESUMO GERAL
-if menu == "📊 Resumo Geral":
-    total = len(boletos)
-    pagos = boletos[boletos["Status"] == "paid"]
-    vencidos = boletos[boletos["Status"] == "expired"]
-    abertos = boletos[boletos["Status"] == "opened"]
-    st.subheader("📊 Resumo Financeiro")
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("Total de Boletos", total)
-    col2.metric("Boletos Pagos", len(pagos))
-    col3.metric("Boletos Vencidos", len(vencidos))
-    col4.metric("Boletos em Aberto", len(abertos))
-    col5.metric("Valor Total Pago", f"R$ {pagos['Valor'].sum():,.2f}".replace(".", ","))
+    if menu == "📊 Visão Geral":
+        st.subheader("Visão Geral")
+        total_opened = len(df_ao[df_ao["Status"] == "opened"])
+        total_overdue = len(df_ao[df_ao["Status"] == "overdue"])
+        pagos_ontem = len(df_pg)
 
-# -- CLIENTES COM 3 BOLETOS VENCIDOS
-elif menu == "🚨 Clientes com 3 Boletos Vencidos":
-    vencidos = boletos[boletos["Status"] == "expired"]
-    contagem = vencidos["CPF/CNPJ"].value_counts()
-    cpf_cnpj_com_3 = contagem[contagem == 3].index
-    resultado = vencidos[vencidos["CPF/CNPJ"].isin(cpf_cnpj_com_3)]
-    st.subheader("🚨 Clientes com 3 Boletos Vencidos")
-    st.dataframe(resultado[["Nome", "CPF/CNPJ", "Data de Vencimento"]].drop_duplicates())
-    st.download_button("📥 Baixar Excel", resultado.to_csv(index=False), "clientes_3_vencidos.csv")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Boletos Abertos", total_opened)
+        col2.metric("Boletos Vencidos", total_overdue)
+        col3.metric("Pagos Ontem", pagos_ontem)
 
-# -- CANCELAMENTO (Simulado)
-elif menu == "🧾 Cancelar Assinatura (simulado)":
-    st.subheader("🧾 Cancelar Assinatura")
-    doc = st.text_input("Digite o CPF ou CNPJ do cliente")
-    if st.button("Cancelar"):
-        st.success(f"Assinatura cancelada para {doc} (simulado)")
+    elif menu == "📁 Boletos":
+        st.subheader("Boletos Ativos (opened e overdue)")
+        if df_ao.empty:
+            st.info("Nenhum boleto aberto ou vencido encontrado.")
+        else:
+            st.dataframe(df_ao[["Cliente", "Status", "Vencimento", "Valor", "Etiqueta"]], use_container_width=True)
 
-# -- DELETAR (Simulado)
-elif menu == "💣 Deletar Boletos (simulado)":
-    st.subheader("💣 Deletar Boletos")
-    doc = st.text_input("Digite o CPF ou CNPJ")
-    if doc:
-        encontrados = boletos[boletos["CPF/CNPJ"] == doc]
-        st.dataframe(encontrados)
-        if st.button("Deletar todos (simulado)"):
-            st.success(f"Boletos de {doc} deletados (simulado)")
+    elif menu == "📉 Indicadores":
+        st.subheader("Indicadores Avançados")
+        inadimplentes_criticos = len(df_ao[df_ao["Status"] == "overdue"])  # exemplo
+        boletos_multiplos = len(df_ao[df_ao.duplicated(subset=["Cliente"], keep=False)])
+        faturamento_aberto = df_ao["Valor"].replace(r"[R$\s\.]", "", regex=True).astype(float).sum()
 
-# -- PAGAMENTOS
-elif menu == "📅 Relatório de Pagamentos":
-    pagos = boletos[boletos["Status"] == "paid"].copy()
-    pagos["Data de Pagamento"] = pd.to_datetime(pagos["Data de Pagamento"], errors="coerce")
-    total = pagos["Valor"].sum()
-    st.subheader("📅 Relatório de Boletos Pagos")
-    st.metric("Total Pago", f"R$ {total:,.2f}".replace(".", ","))
-    st.dataframe(pagos)
-    st.download_button("📥 Baixar CSV", pagos.to_csv(index=False), "boletos_pagos.csv")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Inadimplentes Críticos", inadimplentes_criticos)
+        col2.metric("Clientes com >1 Boleto", boletos_multiplos)
+        col3.metric("Faturamento Aberto (R$)", f"{faturamento_aberto:,.2f}")
 
+    else:  # Configurações
+        st.subheader("Configurações e Ajuda")
+        st.write("Edite seu `.streamlit/secrets.toml` para ajustar token e senha")
+        st.code("""
+[auth]
+senha = "SUA_SENHA_AQUI"
+
+[kobana]
+api_key = "SEU_TOKEN_KOBANA"
+base_url = "https://api.kobana.com.br/v1"
+        """, language="toml")
+
+    st.markdown("")
+    st.caption("🔒 Painel restrito – Desenvolvido por Danny – Versão 1.0.0 – 01/07/2025")
