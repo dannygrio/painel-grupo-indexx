@@ -31,30 +31,44 @@ def fetch_overdue_billets():
         "accept": "application/json",
         "authorization": f"Bearer {api_key}"
     }
-    params = {
-        "status":   "overdue",
-        "per_page": 50
-    }
 
-    r = requests.get(url, headers=headers, params=params, timeout=10)
-    st.write("🔍 Status da resposta:", r.status_code)
-    st.write("🔍 Resposta da API:", r.text)
+    all_boletos = []
+    page = 1
 
-    try:
-        items = r.json().get("items", [])
-        df = pd.json_normalize(items)
-        return df.rename(columns={
-            "customer_person_name": "Cliente",
-            "customer_document":    "Documento",
-            "status":               "Status",
-            "expire_at":            "Vencimento",
-            "paid_at":              "Pago em",
-            "amount":               "Valor",
-            "tags":                 "Etiqueta"
-        })
-    except Exception as e:
-        st.error(f"Erro ao processar resposta JSON da API: {e}")
+    while True:
+        params = {
+            "status": "overdue",
+            "per_page": 100,
+            "page": page
+        }
+
+        r = requests.get(url, headers=headers, params=params, timeout=10)
+        if r.status_code != 200:
+            st.error(f"Erro ao buscar página {page} – {r.status_code}: {r.text}")
+            break
+
+        data = r.json().get("items", [])
+        if not data:
+            break
+
+        all_boletos.extend(data)
+        if len(data) < 100:
+            break
+        page += 1
+
+    if not all_boletos:
         return pd.DataFrame()
+
+    df = pd.json_normalize(all_boletos)
+    return df.rename(columns={
+        "customer_person_name": "Cliente",
+        "customer_document":    "Documento",
+        "status":               "Status",
+        "expire_at":            "Vencimento",
+        "paid_at":              "Pago em",
+        "amount":               "Valor",
+        "tags":                 "Etiqueta"
+    })
 
 @st.cache_data(show_spinner=False)
 def fetch_subscriptions():
@@ -68,7 +82,7 @@ def fetch_subscriptions():
     }
     r = requests.get(url, headers=headers, timeout=10)
     if r.status_code != 200:
-        st.error(f"erro ao obter assinaturas {r.status_code} {r.text}")
+        st.error(f"Erro ao obter assinaturas {r.status_code} {r.text}")
         return pd.DataFrame()
     items = r.json()
     df    = pd.json_normalize(items)
@@ -89,41 +103,43 @@ def delete_subscription_by_id(sub_id):
     }
     r = requests.delete(url, headers=headers, timeout=10)
     if r.status_code in (200, 204):
-        st.success(f"assinatura {sub_id} excluída com sucesso")
+        st.success(f"Assinatura {sub_id} excluída com sucesso.")
     else:
-        st.error(f"falha ao excluir assinatura {sub_id}: {r.status_code} {r.text}")
+        st.error(f"Falha ao excluir assinatura {sub_id}: {r.status_code} {r.text}")
 
 if st.session_state["logado"]:
-    st.success("✅ acesso liberado")
-    menu = st.sidebar.radio("navegação", [
-        "clientes com 3 boletos vencidos",
-        "deletar assinatura"
+    st.success("✅ Acesso liberado")
+    menu = st.sidebar.radio("Navegação", [
+        "Clientes com 3 Boletos Vencidos",
+        "Deletar Assinatura"
     ])
 
-    if menu == "clientes com 3 boletos vencidos":
+    if menu == "Clientes com 3 Boletos Vencidos":
         df = fetch_overdue_billets()
         if df.empty or "Documento" not in df.columns:
-            st.info("nenhum boleto vencido encontrado")
+            st.info("Nenhum boleto vencido encontrado.")
         else:
-            grp  = df.groupby(["Cliente", "Documento"]).size().reset_index(name="qtd_vencidos")
-            tres = grp[grp["qtd_vencidos"] >= 3]
+            grp  = df.groupby(["Cliente", "Documento"]).size().reset_index(name="Qtd Vencidos")
+            tres = grp[grp["Qtd Vencidos"] >= 3]
             if tres.empty:
-                st.info("nenhum cliente com 3 ou mais boletos vencidos")
+                st.info("Nenhum cliente com 3 ou mais boletos vencidos.")
             else:
+                st.subheader("🚨 Clientes com 3+ boletos vencidos")
                 st.dataframe(tres, use_container_width=True)
+                st.download_button("📥 Baixar Excel", tres.to_csv(index=False), file_name="clientes_inadimplentes.csv")
 
     else:
-        st.subheader("deletar assinatura por cpf ou cnpj")
-        doc = st.text_input("informe cpf ou cnpj")
-        if st.button("excluir"):
+        st.subheader("🧾 Deletar assinatura por CPF/CNPJ")
+        doc = st.text_input("Informe CPF ou CNPJ")
+        if st.button("Excluir"):
             subs    = fetch_subscriptions()
             achados = subs[subs["Documento"] == doc.strip()]
             if achados.empty:
-                st.warning("nenhuma assinatura encontrada para esse documento")
+                st.warning("Nenhuma assinatura encontrada para esse documento.")
             elif len(achados) > 1:
-                st.warning(f"encontradas múltiplas assinaturas: {achados['ID'].tolist()}")
+                st.warning(f"Encontradas múltiplas assinaturas: {achados['ID'].tolist()}")
             else:
                 sub_id = achados.iloc[0]["ID"]
                 delete_subscription_by_id(sub_id)
 
-    st.caption("🔒 desenvolvido por Danny – versão 1.0.0 – 03/07/2025")
+    st.caption("🔒 desenvolvido por Danny – versão 1.0.2 – 03/07/2025")
