@@ -31,7 +31,7 @@ def fetch_overdue_billets():
         "authorization": f"Bearer {api_key}"
     }
 
-    todos_boletos = []
+    all_items = []
     page = 1
 
     while True:
@@ -40,31 +40,28 @@ def fetch_overdue_billets():
             "per_page": 50,
             "page": page
         }
-        r = requests.get(f"{base.rstrip('/')}/bank_billets", headers=headers, params=params, timeout=10)
+        url = f"{base.rstrip('/')}/bank_billets"
+        r = requests.get(url, headers=headers, params=params, timeout=10)
 
         if r.status_code != 200:
-            st.error(f"Erro ao buscar boletos vencidos – Página {page}: {r.status_code} {r.text}")
+            st.error(f"Erro na página {page}: {r.status_code} – {r.text}")
             break
 
-        try:
-            page_data = r.json()
-            if not isinstance(page_data, list):
-                break
-        except Exception as e:
-            st.error(f"Erro ao processar resposta JSON da API: {e}")
+        items = r.json()
+        if not isinstance(items, list):
+            st.error("⚠️ Resposta inesperada da API. Esperava lista de boletos.")
             break
 
-        todos_boletos.extend(page_data)
+        if not items:
+            break  # Fim da paginação
 
-        if len(page_data) < 50:
-            break
-
+        all_items.extend(items)
         page += 1
 
-    if not todos_boletos:
+    if not all_items:
         return pd.DataFrame()
 
-    df = pd.json_normalize(todos_boletos)
+    df = pd.json_normalize(all_items)
     return df.rename(columns={
         "customer_person_name": "Cliente",
         "customer_document":    "Documento",
