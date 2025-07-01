@@ -45,8 +45,7 @@ def fetch_overdue_billets():
                 st.error(f"Erro na requisição: {r.status_code}")
                 break
 
-            json_data = r.json()
-            page_data = json_data.get("items", [])
+            page_data = r.json()
             if not page_data:
                 break
             todos.extend(page_data)
