@@ -1,4 +1,4 @@
-# main.py – Painel Grupo Indexx – Versão 1.0.1 – Produção – Atualizado em 01/07/2025 por Danny
+# main.py – versão 1.0.2 – 01/07/2025
 
 import streamlit as st
 import pandas as pd
@@ -12,7 +12,7 @@ if "logado" not in st.session_state:
     st.session_state["logado"] = False
 
 if not st.session_state["logado"]:
-    senha = st.text_input("Digite a senha para acessar o painel", type="password")
+    senha = st.text_input("Digite a senha de acesso", type="password")
     if "auth" not in st.secrets or "senha" not in st.secrets["auth"]:
         st.error("Configure a senha em [auth] do secrets.toml")
     elif senha == st.secrets["auth"]["senha"]:
@@ -26,51 +26,54 @@ def fetch_overdue_billets():
     cfg     = st.secrets["kobana"]
     api_key = cfg["api_key"]
     base    = cfg.get("base_url", "https://api.kobana.com.br/v1")
-    url     = f"{base.rstrip('/')}/bank_billets"
     headers = {
         "accept": "application/json",
         "authorization": f"Bearer {api_key}"
     }
-    params = {
-        "status":   "overdue",
-        "per_page": 100,
-        "page":     1
-    }
 
-    todos = []
-    try:
-        while True:
-            r = requests.get(url, headers=headers, params=params, timeout=10)
-            if r.status_code != 200:
-                st.error(f"Erro na requisição: {r.status_code}")
-                break
+    todos_boletos = []
+    page = 1
 
+    while True:
+        params = {
+            "status": "overdue",
+            "per_page": 50,
+            "page": page
+        }
+        r = requests.get(f"{base.rstrip('/')}/bank_billets", headers=headers, params=params, timeout=10)
+
+        if r.status_code != 200:
+            st.error(f"Erro ao buscar boletos vencidos – Página {page}: {r.status_code} {r.text}")
+            break
+
+        try:
             page_data = r.json()
-            if not page_data:
+            if not isinstance(page_data, list):
                 break
-            todos.extend(page_data)
+        except Exception as e:
+            st.error(f"Erro ao processar resposta JSON da API: {e}")
+            break
 
-            if len(page_data) < params["per_page"]:
-                break
-            params["page"] += 1
+        todos_boletos.extend(page_data)
 
-        if not todos:
-            return pd.DataFrame()
+        if len(page_data) < 50:
+            break
 
-        df = pd.json_normalize(todos)
-        return df.rename(columns={
-            "customer_person_name": "Cliente",
-            "customer_document":    "Documento",
-            "status":               "Status",
-            "expire_at":            "Vencimento",
-            "paid_at":              "Pago em",
-            "amount":               "Valor",
-            "tags":                 "Etiqueta"
-        })
+        page += 1
 
-    except Exception as e:
-        st.error(f"Erro ao processar resposta JSON da API: {e}")
+    if not todos_boletos:
         return pd.DataFrame()
+
+    df = pd.json_normalize(todos_boletos)
+    return df.rename(columns={
+        "customer_person_name": "Cliente",
+        "customer_document":    "Documento",
+        "status":               "Status",
+        "expire_at":            "Vencimento",
+        "paid_at":              "Pago em",
+        "amount":               "Valor",
+        "tags":                 "Etiqueta"
+    })
 
 @st.cache_data(show_spinner=False)
 def fetch_subscriptions():
@@ -89,9 +92,9 @@ def fetch_subscriptions():
     items = r.json()
     df    = pd.json_normalize(items)
     return df.rename(columns={
-        "id":                   "ID",
-        "customer_person_name": "Cliente",
-        "customer_document":    "Documento"
+        "id":                    "ID",
+        "customer_person_name":  "Cliente",
+        "customer_document":     "Documento"
     })
 
 def delete_subscription_by_id(sub_id):
@@ -111,7 +114,6 @@ def delete_subscription_by_id(sub_id):
 
 if st.session_state["logado"]:
     st.success("✅ Acesso liberado")
-
     menu = st.sidebar.radio("Navegação", [
         "Clientes com 3 Boletos Vencidos",
         "Deletar Assinatura"
@@ -143,4 +145,4 @@ if st.session_state["logado"]:
                 sub_id = achados.iloc[0]["ID"]
                 delete_subscription_by_id(sub_id)
 
-    st.caption("🔒 Desenvolvido por Danny – versão 1.0.1 – 01/07/2025")
+    st.caption("🔒 Desenvolvido por Danny – versão 1.0.2 – 01/07/2025")
