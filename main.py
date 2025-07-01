@@ -1,4 +1,4 @@
-# main.py – Painel Grupo Indexx – Versão 1.0.1 – Atualizado em 01/07/2025 por Danny
+# main.py – Painel Grupo Indexx – Versão 1.0.1 – Produção – Atualizado em 01/07/2025 por Danny
 
 import streamlit as st
 import pandas as pd
@@ -41,9 +41,6 @@ def fetch_overdue_billets():
     try:
         while True:
             r = requests.get(url, headers=headers, params=params, timeout=10)
-            st.write("🔍 Status da resposta:", r.status_code)
-            st.write("📄 Resposta da API:", r.text)
-
             if r.status_code != 200:
                 st.error(f"Erro na requisição: {r.status_code}")
                 break
