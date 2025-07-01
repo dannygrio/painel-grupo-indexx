@@ -1,19 +1,19 @@
+# ✅ Painel Grupo Indexx – Versão 1.0.3 – Atualizado em 01/07/2025 por Danny
 import streamlit as st
 import pandas as pd
 import requests
-from collections import Counter
 
 # Configuração da página
-st.set_page_config(page_title="Painel Interno – Grupo Indexx", layout="centered")
+st.set_page_config(page_title="Painel Grupo Indexx", layout="centered")
 st.markdown("## 🔐 Painel Interno – Gestão Grupo Indexx")
 
-# Autenticação
+# Campo de login
 if "logado" not in st.session_state:
     st.session_state["logado"] = False
 
 if not st.session_state["logado"]:
-    senha = st.text_input("Digite a senha de acesso", type="password")
-    if senha == st.secrets["auth"]["senha"]:
+    senha_digitada = st.text_input("Digite a senha de acesso", type="password")
+    if senha_digitada == st.secrets["auth"]["senha"]:
         st.session_state["logado"] = True
         st.success("✅ Acesso liberado")
     else:
@@ -21,8 +21,11 @@ if not st.session_state["logado"]:
 else:
     st.success("✅ Acesso liberado")
 
-# Função para buscar boletos vencidos
-@st.cache_data(show_spinner="🔄 Buscando boletos vencidos...")
+# Menu lateral
+menu = st.sidebar.radio("🔧 Navegação", ["🔴 Clientes com 3 Boletos Vencidos", "🗑️ Deletar Assinatura"])
+
+# Função para buscar boletos vencidos com paginação
+@st.cache_data(ttl=3600)
 def fetch_overdue_billets():
     base_url = st.secrets["kobana"]["base_url"]
     endpoint = st.secrets["kobana"]["endpoint"]
@@ -31,8 +34,8 @@ def fetch_overdue_billets():
         "authorization": f"Bearer {st.secrets['kobana']['api_key']}"
     }
 
-    all_billets = []
     page = 1
+    all_billets = []
 
     while True:
         params = {"status": "overdue", "page": page, "per_page": 50}
@@ -40,44 +43,31 @@ def fetch_overdue_billets():
         if r.status_code != 200:
             st.error(f"Erro ao obter boletos vencidos: {r.status_code} – {r.text}")
             return pd.DataFrame()
-
-        data = r.json()
-        items = data.get("items", [])
+        
+        items = r.json()
         if not items:
             break
 
         all_billets.extend(items)
         page += 1
 
-    df = pd.DataFrame(all_billets)
-    return df
+    return pd.DataFrame(all_billets)
 
-# Menu lateral fixo
-st.sidebar.markdown("## Navegação")
-aba = st.sidebar.radio("", ["🔴 Clientes com 3 Boletos Vencidos", "🗑️ Deletar Assinatura"])
-
-if aba == "🔴 Clientes com 3 Boletos Vencidos":
+# Página de clientes com 3 boletos vencidos
+if menu == "🔴 Clientes com 3 Boletos Vencidos":
     df_boletos = fetch_overdue_billets()
 
     if df_boletos.empty:
         st.info("Nenhum boleto vencido encontrado")
     else:
-        # Contagem por CPF/CNPJ
-        contagem = Counter(df_boletos["customer_cnpj_cpf"])
-        mais_de_tres = [doc for doc, qtd in contagem.items() if qtd >= 3]
-
-        if not mais_de_tres:
+        # Agrupar por CPF/CNPJ e contar
+        agrupado = df_boletos.groupby("customer_cnpj_cpf").size().reset_index(name="qtd_vencidos")
+        filtrado = agrupado[agrupado["qtd_vencidos"] >= 3]
+        if filtrado.empty:
             st.info("Nenhum cliente com 3 boletos vencidos")
         else:
-            df_filtrado = df_boletos[df_boletos["customer_cnpj_cpf"].isin(mais_de_tres)]
-            df_final = df_filtrado[[
-                "customer_person_name", "customer_cnpj_cpf", "expire_at", "amount", "url"
-            ]].sort_values(by=["customer_cnpj_cpf", "expire_at"])
-            st.dataframe(df_final, use_container_width=True)
-
-elif aba == "🗑️ Deletar Assinatura":
-    st.warning("⚠️ Função de exclusão ainda não implementada")
+            st.warning("⚠️ Clientes com 3 boletos vencidos encontrados:")
+            st.dataframe(filtrado, use_container_width=True)
 
 # Rodapé
-st.markdown("<hr>", unsafe_allow_html=True)
 st.markdown("🔒 Desenvolvido por Danny – versão 1.0.3 – 01/07/2025")
