@@ -1,11 +1,10 @@
-# Painel Interno – Gestão Grupo Indexx – Versão 1.0.3 – Atualizado em 01/07/2025 por Danny
-
 import streamlit as st
 import pandas as pd
 import requests
 from collections import Counter
 
-st.set_page_config(page_title="Painel Grupo Indexx", layout="centered")
+# Configuração da página
+st.set_page_config(page_title="Painel Interno – Grupo Indexx", layout="centered")
 st.markdown("## 🔐 Painel Interno – Gestão Grupo Indexx")
 
 # Autenticação
@@ -19,81 +18,66 @@ if not st.session_state["logado"]:
         st.success("✅ Acesso liberado")
     else:
         st.stop()
+else:
+    st.success("✅ Acesso liberado")
 
-st.success("✅ Acesso liberado")
-
-# Função para buscar todos os boletos vencidos (paginado)
-@st.cache_data(show_spinner=False)
+# Função para buscar boletos vencidos
+@st.cache_data(show_spinner="🔄 Buscando boletos vencidos...")
 def fetch_overdue_billets():
-    url = "https://api.kobana.com.br/v1/bank_billets"
+    base_url = st.secrets["kobana"]["base_url"]
+    endpoint = st.secrets["kobana"]["endpoint"]
     headers = {
         "accept": "application/json",
-        "authorization": f"Bearer {st.secrets['auth']['token']}"
+        "authorization": f"Bearer {st.secrets['kobana']['api_key']}"
     }
 
-    boletos = []
+    all_billets = []
     page = 1
 
     while True:
-        params = {"status": "overdue", "per_page": 50, "page": page}
-        r = requests.get(url, headers=headers, params=params, timeout=10)
-
+        params = {"status": "overdue", "page": page, "per_page": 50}
+        r = requests.get(f"{base_url}{endpoint}", headers=headers, params=params, timeout=10)
         if r.status_code != 200:
-            st.error(f"Erro ao obter boletos (página {page}): {r.status_code}")
-            break
+            st.error(f"Erro ao obter boletos vencidos: {r.status_code} – {r.text}")
+            return pd.DataFrame()
 
         data = r.json()
-        if not isinstance(data, dict):
-            st.error("Erro inesperado no retorno da API.")
-            break
-
         items = data.get("items", [])
         if not items:
             break
 
-        boletos.extend(items)
+        all_billets.extend(items)
         page += 1
 
-    if not boletos:
-        return pd.DataFrame()
+    df = pd.DataFrame(all_billets)
+    return df
 
-    df = pd.json_normalize(boletos)
-    return df.rename(columns={
-        "customer_person_name": "Cliente",
-        "customer_document": "Documento",
-        "status": "Status",
-        "expire_at": "Vencimento",
-        "paid_at": "Pago em",
-        "amount": "Valor",
-        "tags": "Etiqueta"
-    })
+# Menu lateral fixo
+st.sidebar.markdown("## Navegação")
+aba = st.sidebar.radio("", ["🔴 Clientes com 3 Boletos Vencidos", "🗑️ Deletar Assinatura"])
 
-# Função para processar e agrupar
-def filtrar_clientes_3_vencidos(df):
-    contagem = Counter(df["Documento"])
-    documentos_criticos = [doc for doc, count in contagem.items() if count >= 3]
-    return df[df["Documento"].isin(documentos_criticos)]
-
-# Menu lateral
-aba = st.sidebar.radio("Navegação", ["📍 Clientes com 3 Boletos Vencidos", "🗑️ Deletar Assinatura"])
-
-# Conteúdo principal
-if aba == "📍 Clientes com 3 Boletos Vencidos":
+if aba == "🔴 Clientes com 3 Boletos Vencidos":
     df_boletos = fetch_overdue_billets()
 
     if df_boletos.empty:
         st.info("Nenhum boleto vencido encontrado")
     else:
-        df_filtrado = filtrar_clientes_3_vencidos(df_boletos)
+        # Contagem por CPF/CNPJ
+        contagem = Counter(df_boletos["customer_cnpj_cpf"])
+        mais_de_tres = [doc for doc, qtd in contagem.items() if qtd >= 3]
 
-        if df_filtrado.empty:
-            st.success("Nenhum cliente com 3 boletos vencidos encontrado")
+        if not mais_de_tres:
+            st.info("Nenhum cliente com 3 boletos vencidos")
         else:
-            st.subheader("🔴 Clientes com 3 ou mais boletos vencidos")
-            st.dataframe(df_filtrado)
+            df_filtrado = df_boletos[df_boletos["customer_cnpj_cpf"].isin(mais_de_tres)]
+            df_final = df_filtrado[[
+                "customer_person_name", "customer_cnpj_cpf", "expire_at", "amount", "url"
+            ]].sort_values(by=["customer_cnpj_cpf", "expire_at"])
+            st.dataframe(df_final, use_container_width=True)
 
 elif aba == "🗑️ Deletar Assinatura":
-    st.info("🔧 Em construção")
+    st.warning("⚠️ Função de exclusão ainda não implementada")
 
 # Rodapé
+st.markdown("<hr>", unsafe_allow_html=True)
 st.markdown("🔒 Desenvolvido por Danny – versão 1.0.3 – 01/07/2025")
