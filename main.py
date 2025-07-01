@@ -3,7 +3,6 @@
 import streamlit as st
 import pandas as pd
 import requests
-from datetime import date, timedelta
 
 st.set_page_config(page_title="Painel Grupo Indexx", layout="wide")
 st.markdown("<h2 style='text-align:center'>🔐 Painel Interno – Gestão Grupo Indexx</h2>", unsafe_allow_html=True)
@@ -27,34 +26,35 @@ def fetch_overdue_billets():
     cfg     = st.secrets["kobana"]
     api_key = cfg["api_key"]
     base    = cfg.get("base_url", "https://api.kobana.com.br/v1")
+    url     = f"{base.rstrip('/')}/bank_billets"
     headers = {
         "accept": "application/json",
         "authorization": f"Bearer {api_key}"
     }
-    boletos = []
-    page = 1
-    while True:
-        url = f"{base.rstrip('/')}/bank_billets"
-        params = {"status": "overdue", "per_page": 100, "page": page}
-        r = requests.get(url, headers=headers, params=params, timeout=10)
-st.write("🔍 Status da resposta:", r.status_code)
-st.write("🔍 Resposta da API:", r.text)
+    params = {
+        "status":   "overdue",
+        "per_page": 50
+    }
 
-try:
-    items = r.json().get("items", [])
-    df = pd.json_normalize(items)
-    return df.rename(columns={
-        "customer_person_name": "Cliente",
-        "customer_document":    "Documento",
-        "status":               "Status",
-        "expire_at":            "Vencimento",
-        "paid_at":              "Pago em",
-        "amount":               "Valor",
-        "tags":                 "Etiqueta"
-    })
-except Exception as e:
-    st.error(f"Erro ao processar resposta JSON da API: {e}")
-    return pd.DataFrame()
+    r = requests.get(url, headers=headers, params=params, timeout=10)
+    st.write("🔍 Status da resposta:", r.status_code)
+    st.write("🔍 Resposta da API:", r.text)
+
+    try:
+        items = r.json().get("items", [])
+        df = pd.json_normalize(items)
+        return df.rename(columns={
+            "customer_person_name": "Cliente",
+            "customer_document":    "Documento",
+            "status":               "Status",
+            "expire_at":            "Vencimento",
+            "paid_at":              "Pago em",
+            "amount":               "Valor",
+            "tags":                 "Etiqueta"
+        })
+    except Exception as e:
+        st.error(f"Erro ao processar resposta JSON da API: {e}")
+        return pd.DataFrame()
 
 @st.cache_data(show_spinner=False)
 def fetch_subscriptions():
