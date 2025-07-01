@@ -37,17 +37,12 @@ def fetch_overdue_billets():
         url = f"{base.rstrip('/')}/bank_billets"
         params = {"status": "overdue", "per_page": 100, "page": page}
         r = requests.get(url, headers=headers, params=params, timeout=10)
-        if r.status_code != 200:
-            st.error(f"erro ao obter boletos vencidos {r.status_code} {r.text}")
-            break
-        data = r.json().get("items") or r.json()
-        if not data:
-            break
-        boletos.extend(data)
-        if len(data) < 100:
-            break
-        page += 1
-    df = pd.json_normalize(boletos)
+st.write("🔍 Status da resposta:", r.status_code)
+st.write("🔍 Resposta da API:", r.text)
+
+try:
+    items = r.json().get("items", [])
+    df = pd.json_normalize(items)
     return df.rename(columns={
         "customer_person_name": "Cliente",
         "customer_document":    "Documento",
@@ -57,6 +52,9 @@ def fetch_overdue_billets():
         "amount":               "Valor",
         "tags":                 "Etiqueta"
     })
+except Exception as e:
+    st.error(f"Erro ao processar resposta JSON da API: {e}")
+    return pd.DataFrame()
 
 @st.cache_data(show_spinner=False)
 def fetch_subscriptions():
