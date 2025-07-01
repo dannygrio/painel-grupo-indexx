@@ -27,21 +27,27 @@ def fetch_overdue_billets():
     cfg     = st.secrets["kobana"]
     api_key = cfg["api_key"]
     base    = cfg.get("base_url", "https://api.kobana.com.br/v1")
-    url     = f"{base.rstrip('/')}/bank_billets"
     headers = {
         "accept": "application/json",
         "authorization": f"Bearer {api_key}"
     }
-    params = {
-        "status":   "overdue",
-        "per_page": 50
-    }
-    r = requests.get(url, headers=headers, params=params, timeout=10)
-    if r.status_code != 200:
-        st.error(f"erro ao obter boletos vencidos {r.status_code} {r.text}")
-        return pd.DataFrame()
-    items = r.json().get("items", [])
-    df    = pd.json_normalize(items)
+    boletos = []
+    page = 1
+    while True:
+        url = f"{base.rstrip('/')}/bank_billets"
+        params = {"status": "overdue", "per_page": 100, "page": page}
+        r = requests.get(url, headers=headers, params=params, timeout=10)
+        if r.status_code != 200:
+            st.error(f"erro ao obter boletos vencidos {r.status_code} {r.text}")
+            break
+        data = r.json().get("items") or r.json()
+        if not data:
+            break
+        boletos.extend(data)
+        if len(data) < 100:
+            break
+        page += 1
+    df = pd.json_normalize(boletos)
     return df.rename(columns={
         "customer_person_name": "Cliente",
         "customer_document":    "Documento",
