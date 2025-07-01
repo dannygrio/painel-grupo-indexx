@@ -5,12 +5,10 @@ import pandas as pd
 import requests
 from datetime import date, timedelta
 
-# página
 st.set_page_config(page_title="Painel Grupo Indexx", layout="wide")
-st.markdown("<h2 style='text-align:center'>🔐 Painel Interno – Gestão Grupo Indexx</h2>",
-            unsafe_allow_html=True)
+st.markdown("<h2 style='text-align:center'>🔐 Painel Interno – Gestão Grupo Indexx</h2>", unsafe_allow_html=True)
+st.markdown("")
 
-# sessão
 if "logado" not in st.session_state:
     st.session_state["logado"] = False
 
@@ -24,55 +22,69 @@ if not st.session_state["logado"]:
     elif senha:
         st.error("senha incorreta")
 
-# busca boletos vencidos
 @st.cache_data(show_spinner=False)
 def fetch_overdue_billets():
-    cfg      = st.secrets["kobana"]
-    api_key  = cfg["api_key"]
-    base     = cfg.get("base_url", "https://api.kobana.com.br/v1")
-    url      = f"{base.rstrip('/')}/bank_billets"  # :contentReference[oaicite:0]{index=0}
-    headers  = {"Authorization": f"Bearer {api_key}"}
-    params   = {"status": "overdue"}
-    r        = requests.get(url, headers=headers, params=params, timeout=10)
+    cfg     = st.secrets["kobana"]
+    api_key = cfg["api_key"]
+    base    = cfg.get("base_url", "https://api.kobana.com.br/v1")
+    url     = f"{base.rstrip('/')}/bank_billets"
+    headers = {
+        "accept": "application/json",
+        "authorization": f"Bearer {api_key}"
+    }
+    params = {
+        "status":   "overdue",
+        "per_page": 50
+    }
+    r = requests.get(url, headers=headers, params=params, timeout=10)
     if r.status_code != 200:
         st.error(f"erro ao obter boletos vencidos {r.status_code} {r.text}")
         return pd.DataFrame()
-    items    = r.json().get("items", [])
-    df       = pd.json_normalize(items)
+    items = r.json().get("items", [])
+    df    = pd.json_normalize(items)
     return df.rename(columns={
         "customer_person_name": "Cliente",
-        "customer_document":    "Documento"
+        "customer_document":    "Documento",
+        "status":               "Status",
+        "expire_at":            "Vencimento",
+        "paid_at":              "Pago em",
+        "amount":               "Valor",
+        "tags":                 "Etiqueta"
     })
 
-# busca assinaturas
 @st.cache_data(show_spinner=False)
 def fetch_subscriptions():
     cfg     = st.secrets["kobana"]
     api_key = cfg["api_key"]
     base    = cfg.get("base_url", "https://api.kobana.com.br/v1")
-    url     = f"{base.rstrip('/')}/customer_subscriptions"  # :contentReference[oaicite:1]{index=1}
-    headers = {"Authorization": f"Bearer {api_key}"}
-    r       = requests.get(url, headers=headers, timeout=10)
+    url     = f"{base.rstrip('/')}/customer_subscriptions"
+    headers = {
+        "accept": "application/json",
+        "authorization": f"Bearer {api_key}"
+    }
+    r = requests.get(url, headers=headers, timeout=10)
     if r.status_code != 200:
         st.error(f"erro ao obter assinaturas {r.status_code} {r.text}")
         return pd.DataFrame()
-    items   = r.json()
-    df      = pd.json_normalize(items)
+    items = r.json()
+    df    = pd.json_normalize(items)
     return df.rename(columns={
-        "id":                  "ID",
-        "customer_person_name":"Cliente",
-        "customer_document":   "Documento"
+        "id":                    "ID",
+        "customer_person_name":  "Cliente",
+        "customer_document":     "Documento"
     })
 
-# exclui assinatura
 def delete_subscription_by_id(sub_id):
-    cfg      = st.secrets["kobana"]
-    api_key  = cfg["api_key"]
-    base     = cfg.get("base_url", "https://api.kobana.com.br/v1")
-    url      = f"{base.rstrip('/')}/customer_subscriptions/{sub_id}"  # :contentReference[oaicite:2]{index=2}
-    headers  = {"Authorization": f"Bearer {api_key}"}
-    r        = requests.delete(url, headers=headers, timeout=10)
-    if r.status_code in (200,204):
+    cfg     = st.secrets["kobana"]
+    api_key = cfg["api_key"]
+    base    = cfg.get("base_url", "https://api.kobana.com.br/v1")
+    url     = f"{base.rstrip('/')}/customer_subscriptions/{sub_id}"
+    headers = {
+        "accept":        "application/json",
+        "authorization": f"Bearer {api_key}"
+    }
+    r = requests.delete(url, headers=headers, timeout=10)
+    if r.status_code in (200, 204):
         st.success(f"assinatura {sub_id} excluída com sucesso")
     else:
         st.error(f"falha ao excluir assinatura {sub_id}: {r.status_code} {r.text}")
@@ -89,18 +101,18 @@ if st.session_state["logado"]:
         if df.empty or "Documento" not in df.columns:
             st.info("nenhum boleto vencido encontrado")
         else:
-            grp = df.groupby(["Cliente","Documento"]).size().reset_index(name="qtd_vencidos")
+            grp  = df.groupby(["Cliente", "Documento"]).size().reset_index(name="qtd_vencidos")
             tres = grp[grp["qtd_vencidos"] >= 3]
             if tres.empty:
                 st.info("nenhum cliente com 3 ou mais boletos vencidos")
             else:
-                st.dataframe(tres)
+                st.dataframe(tres, use_container_width=True)
 
     else:
         st.subheader("deletar assinatura por cpf ou cnpj")
         doc = st.text_input("informe cpf ou cnpj")
         if st.button("excluir"):
-            subs = fetch_subscriptions()
+            subs    = fetch_subscriptions()
             achados = subs[subs["Documento"] == doc.strip()]
             if achados.empty:
                 st.warning("nenhuma assinatura encontrada para esse documento")
