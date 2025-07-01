@@ -5,36 +5,32 @@ import pandas as pd
 import requests
 from datetime import date, timedelta
 
-# Configuração da página
 st.set_page_config(page_title="Painel Grupo Indexx", layout="wide")
 st.markdown("<h2 style='text-align:center'>🔐 Painel Interno – Gestão Grupo Indexx</h2>", unsafe_allow_html=True)
 st.markdown("")
 
-# Controle de sessão
 if "logado" not in st.session_state:
     st.session_state["logado"] = False
 
-# Tela de login
 if not st.session_state["logado"]:
     senha = st.text_input("Digite a senha de acesso", type="password")
     if "auth" not in st.secrets or "senha" not in st.secrets["auth"]:
-        st.error("Configure a senha no bloco [auth] em .streamlit/secrets.toml")
+        st.error("Configure a senha em [auth] no secrets.toml")
     elif senha == st.secrets["auth"]["senha"]:
         st.session_state["logado"] = True
         st.rerun()
     elif senha:
         st.error("Senha incorreta")
 
-# Função para buscar boletos na Kobana
 @st.cache_data(show_spinner=False)
 def fetch_boletos(status_list, date_field=None, date_value=None):
-    kobana_cfg = st.secrets.get("kobana", {})
-    api_key    = kobana_cfg.get("api_key")
-    base_url   = kobana_cfg.get("base_url", "https://api.kobana.com.br/v1")
-    endpoint   = kobana_cfg.get("endpoint", "/boletos")
+    cfg      = st.secrets.get("kobana", {})
+    api_key  = cfg.get("api_key")
+    base_url = cfg.get("base_url", "https://api.kobana.com.br/v1")
+    endpoint = cfg.get("endpoint", "/bank_billets")
 
     if not api_key:
-        st.error("Configure api_key no bloco [kobana] em .streamlit/secrets.toml")
+        st.error("Configure api_key em [kobana] no secrets.toml")
         return pd.DataFrame()
 
     url     = base_url.rstrip("/") + endpoint
@@ -67,15 +63,9 @@ def fetch_boletos(status_list, date_field=None, date_value=None):
     })
     return df
 
-# Painel principal
 if st.session_state["logado"]:
     st.success("✅ Acesso liberado")
-    menu = st.sidebar.radio("Navegação", [
-        "Visao Geral",
-        "Boletos",
-        "Indicadores",
-        "Configuracoes"
-    ])
+    menu = st.sidebar.radio("Navegação", ["Visao Geral", "Boletos", "Indicadores", "Configuracoes"])
 
     hoje  = date.today()
     ontem = (hoje - timedelta(days=1)).isoformat()
@@ -125,7 +115,7 @@ senha      = "admin1234"
 [kobana]
 api_key    = "SEU_TOKEN_AQUI"
 base_url   = "https://api.kobana.com.br/v1"
-endpoint   = "/boletos"
+endpoint   = "/bank_billets"
         """, language="toml")
 
     st.markdown("")
